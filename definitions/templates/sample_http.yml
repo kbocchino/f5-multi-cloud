@@ -1,0 +1,26 @@
+configtemplate: ../definitions/templates/sample_defaults.yml
+config:
+ pool__port: 80 
+ vs__ProfileHTTP: /Common/http 
+ vs__ProfileOneConnect: /Common/oneconnect 
+ vs__ProfileCompression: /Common/httpcompression 
+ vs__ProfileDefaultPersist: /Common/cookie 
+ vs__ProfileFallbackPersist: /Common/source_addr 
+ feature__insertXForwardedFor: enabled 
+ feature__redirectToHTTPS: disabled
+ pool__Pools:
+  - Index: 0
+    Name: pool
+    Description: 
+    LbMethod: round-robin
+    Monitor: 0,1
+    AdvOptions: none
+ monitor__Monitors:
+  - Index: 0
+    Name: /Common/http
+    Type: none
+    Options: none
+  - Index: 1
+    Name: /Common/tcp
+    Type: none
+    Options: none 

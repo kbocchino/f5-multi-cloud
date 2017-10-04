@@ -1,0 +1,20 @@
+name: vsphere-sjc2
+type: vsphere
+region: sjc
+creds: vsphere-sjc.yml 
+vsphere-host: "10.192.75.21"
+vsphere-sdk: "https://10.192.75.21/sdk"
+vsphere-insecure: "1"
+vsphere-datacenter: "SJC-PME"
+vsphere-datastore: "datastore4"
+vsphere-resource-pool: "default"
+ntp-servers:
+ - "0.pool.ntp.org"
+ - "1.pool.ntp.org" 
+timezone: "America/Los_Angeles"
+dns-servers:
+ - "8.8.8.8"
+ - "8.8.4.4"
+dns-search:
+ - example.com
+ - lab.local

@@ -1,0 +1,114 @@
+---
+
+    - debug: var=placementpassthrough_componet
+    - debug: var=scalingproviderprocessmode
+    - debug: var=scalingprovider
+
+#load scaling provider info
+ 
+
+    - name: find scaling provider file for instancename
+      find:
+        paths: "../definitions/scalingproviders"
+        patterns: "*.yml,*.yaml" 
+        contains: '^name:\s*{{scalingprovider}}\b'
+      register: scalingproviderfiles      
+
+    - debug: var=scalingproviderfiles
+
+
+    - name: scaling provider details
+      include_vars:
+         file: "{{ scalingproviderfiles['files'][0]['path'] }}"
+         name: scalingprovidervars
+
+    - debug: var=scalingprovidervars
+
+
+#######if type bigip-l4
+
+    - name: get provider
+      shell: etcdctl get /inventory/f5/deployments/devices/{{ scalingprovidervars['instancename'] }}/provider/name || true
+      register: provider
+
+    - debug: var=provider
+
+
+
+
+#### get current inventory of deployment
+
+    - name: get current depoyment inventoryuuids
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{placementpassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/ | awk -F/ '{ print $15}' || true
+      register: currentdeploymentinstanceuuidinventory
+
+    - debug: var=currentdeploymentinstanceuuidinventory
+
+#deal with nuking of a componet
+
+    - name: get componet nuked state
+      shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{placementpassthrough_componet}}/nuked/state/desired || true
+      register: desiredcomponetnukedstate
+
+
+    - name: set all current instanceuuid to nuke if compoent is set to nuked
+      shell: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{placementpassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/nuked/state/desired true
+      with_items: "{{ currentdeploymentinstanceuuidinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+      when: desiredcomponetnukedstate['stdout'] == "true"
+
+
+#### get inventory of acting generation 
+ 
+
+    - name: get desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{ scalingprovidervars['instancename'] }}/generation/acting || true
+      register: actinggeneration
+
+    - debug: var=actinggeneration
+
+
+    - name: get current generation list
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{ scalingprovidervars['instancename'] }}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/generation; echo;' | awk -F/ '$9 == "{{actinggeneration['stdout']}}" { print $8}' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get /inventory/f5/deployments/devices/{{ scalingprovidervars['instancename'] }}/instances/%/nuked/state/desired 2>&1;  echo;' | awk -F/ '$2 ~ "Error" || $2 == "false" { print $1}'|| true
+      register: actinggenerationinventory
+
+    - debug: var=actinggenerationinventory
+
+
+
+    - set_fact:
+       templatetype: "bigip-l4"
+       iappdeploypassthrough_componet: "{{placementpassthrough_componet}}"
+
+    - name: loop through instances and deploy service
+      include_role:
+        name: bigip_iapp_service
+        tasks_from: scalingprovider
+      with_items: "{{ actinggenerationinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+      when: desiredcomponetnukedstate['stdout'] != "true"
+
+
+#get nuke set inventory
+
+
+    - name: get nuked desired instance placements
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{placementpassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/ | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;  echo;' | awk -F/ '$16 == "true" && $13 != "" { print $15}'
+      register: nukeddesireddeploymentinventory
+
+
+    - debug: var=nukeddesireddeploymentinventory
+
+    - name: loop through nuke instances 
+      include_role:
+        name: bigip_iapp_service
+        tasks_from: scalingprovider-delete
+      with_items: "{{ nukeddesireddeploymentinventory['stdout_lines'] }}"
+      loop_control:
+       loop_var: instanceuuid
+      when: scalingproviderprocessmode == "nuke"
+
+#######
+...

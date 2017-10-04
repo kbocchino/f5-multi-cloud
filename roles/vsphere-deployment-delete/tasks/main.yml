@@ -1,0 +1,30 @@
+---
+# tasks file for vsphere
+    - name: Power off the VM
+      command: "govc vm.power -off {{instancename}}-{{instanceuuid}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+
+    - name: remove the vm
+      command: "govc vm.destroy {{instancename}}-{{instanceuuid}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+
+    - name: clear all other history
+      command: etcdctl rm /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}} --recursive
+
+...

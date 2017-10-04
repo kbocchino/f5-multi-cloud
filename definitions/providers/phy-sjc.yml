@@ -1,0 +1,13 @@
+name: phy-sjc
+type: physical
+region: sjc
+ntp-servers:
+ - "0.pool.ntp.org"
+ - "1.pool.ntp.org" 
+timezone: "America/Los_Angeles"
+dns-servers:
+ - "8.8.8.8"
+ - "8.8.4.4"
+dns-search:
+ - example.com
+ - lab.local

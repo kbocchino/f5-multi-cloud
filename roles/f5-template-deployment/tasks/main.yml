@@ -1,0 +1,42 @@
+---
+# tasks file for f5-template-deployment
+
+    - name: get list of instances that are active
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{device}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/nuked/state/desired 2>&1;  echo;' | awk -F/ '$9 ~ "Error" || $9 == "false" { print $8}' || true
+      register: instanceuuids
+
+    - debug: var=instanceuuids
+
+
+
+    - name: get apiusername
+      shell: etcdctl get /inventory/f5/deployments/devices/{{device}}/creds/apiusername || true
+      register: apiusername
+    
+    - debug: var=apiusername
+    
+    - name: get instancecredsfile
+      shell: etcdctl get /inventory/f5/deployments/devices/{{device}}/creds/path || true
+      register: instancecredsfile
+    
+    - debug: var=instancecredsfile
+    
+    - name: load instance creds file
+      include_vars:
+         file: "../definitions/creds/{{instancecredsfile['stdout']}}"
+         name: instancecredsvars
+    
+    - debug: var=instancecredsvars
+
+
+    - name: loop through instances and true up iapps
+      include_role:
+        name: bigip_iapp_template
+      with_nested: 
+        - "{{ instanceuuids['stdout_lines'] }}"  
+        - "{{ environmentvars['templates']['f5']['iapps'] }}"
+      loop_control:
+       loop_var: templateloop
+
+
+...

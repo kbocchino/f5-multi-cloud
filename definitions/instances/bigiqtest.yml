@@ -1,0 +1,11 @@
+name: bigiqtest
+domain: multi-cloud.lab.fp.f5net.com
+type: bigiq
+mode: unmanaged
+provider: phy-sjc
+creds: bigiqdefault.yml
+apiusername: admin
+subnets: 
+ mgmt:
+  ips:
+   - 172.16.0.97

@@ -1,0 +1,7 @@
+vsphere:
+ medium:
+  deployment: dualcpu
+  diskprovisioning: thin
+ large:
+  deployment: quadcpu
+  diskprovisioning: thin

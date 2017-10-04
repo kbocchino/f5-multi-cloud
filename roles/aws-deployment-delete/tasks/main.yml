@@ -1,0 +1,39 @@
+---
+# tasks file for aws
+    - name: launch ansible cloudformation example with role assumption
+      cloudformation:
+        aws_access_key: "{{ credsvars['aws-access-key'] }}"
+        aws_secret_key: "{{ credsvars['aws-secret-key'] }}" 
+        stack_name: "{{ instancevars['name'] }}"
+        state: absent
+        region: "{{ providervars['region'] }}"
+        disable_rollback: true
+        template_url: "{{ versionvars[instancevars['type']][providervars['type']][instancevars['version']]['template-url'] }}"
+      args:
+        template_parameters:
+          Vpc: "{{ instancevars['vpc'] }}"
+          subnet1Az1: "{{ instancevars['networkmapping-1'] }}" 
+          bigipExternalSecurityGroup: "{{ instancevars['securitygroup'] }}"
+          sshKey: "{{ instancevars['sshkey'] }}"
+          managementSubnetAz1: "{{ instancevars['networkmapping-mgmt'] }}"
+          licenseKey1: "FYUBQ-ECBLJ-ZABFH-CKTDZ-GLSWYBZ" 
+          bigipManagementSecurityGroup: "{{ instancevars['securitygroup'] }}"
+        tags:
+          Stack: "{{ instancevars['name'] }}"
+      delegate_to: localhost   
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+#add validation here then set current state
+
+    - name: set deployed state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/deployed/state/current true
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/onboarded/state/desired true
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/onboarded/state/current false
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+...

@@ -1,0 +1,34 @@
+name: vera
+domain: multi-cloud.lab.fp.f5net.com
+type: bigip
+mode: managed
+bigiq: bigiqtest
+provider: vsphere-sjc2
+scalingprovider: pat
+version: 12.1.2
+size: large
+creds: bigipdefault.yml
+apiusername: admin
+instancecountmin: 1
+instancecountmax: 5
+instancecountdesired: 2
+subnets:
+ mgmt:
+  ips: DHCP
+ dataOne:
+  interfaces:
+   untagged: 1.1
+  ips: ipam
+  defaultvips: yes
+  defaultroute: yes
+ dataTwo:
+  interfaces:
+   untagged: 1.2
+  ips: ipam
+interfacemappings:
+ mgmt: mgmt
+ 1.1: dataOne
+ 1.2: dataTwo
+modules:
+ - ltm
+ - asm

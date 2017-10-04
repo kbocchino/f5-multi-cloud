@@ -1,0 +1,162 @@
+---
+#pick an instance we want to talk with
+
+    - name: get current bigiq state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}}/bigiq/managed/state/current || true
+      register: bigiqmanagedstatecurrent     
+
+
+    - name: get mgmtip
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}}/mgmtip || true
+      register: mgmtip
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+    - name: get list of bigiqmgmtips
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/instances | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;' | awk -F/ '$9 ~ "Error" || $9 == "false" { print $8}' | xargs -n 1 -I% sh -c 'etcdctl get inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/instances/%/mgmtip'
+      register: bigiqmgmtips
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+    - debug: var=bigiqmgmtips
+
+#add logic to figure out which one is up and active
+
+    - set_fact:
+       bigiqmgmtip: "{{bigiqmgmtips['stdout_lines']|first}}"
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+ 
+    - name: get bigiqapiusername
+      shell: etcdctl get /inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/creds/apiusername || true
+      register: bigiqapiusername
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+      
+    - debug: var=bigiqapiusername
+      
+    - name: get bigiqinstancecredsfile
+      shell: etcdctl get /inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/creds/path || true
+      register: bigiqinstancecredsfile
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+      
+    - debug: var=bigiqinstancecredsfile
+      
+      
+    - name: load instance creds file
+      include_vars:
+       file: "../definitions/creds/{{ bigiqinstancecredsfile['stdout'] }}"
+       name: bigiqinstancecredsvars
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+     
+    - debug: var=bigiqinstancecredsvars
+ 
+ 
+ 
+    - name: get bigiq-auth
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/shared/authn/login"
+       method: POST
+       body: "{username: {{bigiqapiusername['stdout']}}, password:{{bigiqinstancecredsvars[bigiqapiusername['stdout']]['password']}}}"
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      register: bigiqauthtokenrequest
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+ 
+    - debug: var=bigiqauthtokenrequest['json']['token']['token']
+  
+    - set_fact:
+       bigiqauthtoken: "{{bigiqauthtokenrequest['json']['token']['token']}}"
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+
+
+    - name: get machineid
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/system/machineid-resolver?$filter=('address'+eq+'{{mgmtip['stdout']}}')"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqmachineidlookup
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+
+
+
+    - set_fact:
+       machineid: "{{bigiqmachineidlookup['json']['items'][0]['machineId']}}"
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+    - debug: var=machineid
+
+
+
+    - name: start removal
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/global/tasks/device-remove-mgmt-authority"
+       method: POST
+       body:
+        deviceReference:
+         link: https://localhost/mgmt/cm/system/machineid-resolver/{{machineid}}
+        moduleList:
+         - module: adc_core
+         - module: access
+         - module: asm
+         - module: firewall
+         - module: security_shared
+         - module: dns
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceremove
+      ignore_errors: yes
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+    - debug: var=bigiqdeviceremove
+
+    - name: get status
+      uri:
+       url: "{{bigiqdeviceremove.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceremovelookup
+      until: bigiqdeviceremovelookup.json.currentStep == "DONE"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+
+
+    - name: start task delete device
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/global/tasks/device-remove-trust"
+       method: POST
+       body:
+        deviceReference:
+         link: https://localhost/mgmt/cm/system/machineid-resolver/{{machineid}}
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdevicetrust
+      ignore_errors: yes
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+    - debug: var=bigiqdevicetrust
+
+
+
+    - name: clear state
+      shell: etcdctl rm /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}}/bigiq/managed/state/current
+      when: bigiqmanagedstatecurrent['stdout'] == "true"
+
+
+
+
+
+...

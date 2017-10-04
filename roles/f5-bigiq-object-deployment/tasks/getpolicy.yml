@@ -1,0 +1,46 @@
+---
+
+    - name: get current version
+      shell: etcdctl get /inventory/f5/asmpolicies/bigiq-managed{{policy.1}}/version/current || true
+      register: currentversion
+
+    - debug: var=currentversion['stdout']
+    - debug: var=policy.3
+
+
+    - name: create directory if they don't exist
+      file:
+       path: "../definitions/templates/asmpolicies/bigiq-managed/{{ policy.4 }}"
+       state: directory
+
+    - name: create directory if they don't exist
+      file:
+       path: "../definitions/templates/asmpolicies/bigiq-managed/{{ policy.4 }}"
+       state: directory  
+      register: currentfiles
+
+    - debug: var=currentfiles['files']|map(attribute='path')|list
+    - debug: msg="https://{{mgmtip}}/mgmt/cm/asm/policy-files/download/{{policy.0}}/{{policy.3}}/{{version}}"
+      with_items: "{{environmentvars['asmpolicy']['downloadversions']}}"
+      loop_control:
+       loop_var: version
+
+    - name: download policy
+      get_url:
+#       url: "https://{{mgmtip}}/mgmt/cm/asm/policy-files/download/{{policy.0}}/{{policy.3}}/{{version}}"
+       url: "https://{{mgmtip}}/mgmt/cm/asm/policy-files/download/9d978e7b-1953-379c-b137-cda3b5a88ae7/1507001965199396/12.1.0"
+       url_username: "{{apiusername['stdout']}}"
+       url_password: "{{instancecredsvars[apiusername['stdout']]['password']}}"
+       force: yes
+       dest: ../definitions/templates/asmpolicies/bigiq-managed{{policy.1}}.xml-{{version}}
+       validate_certs: no
+#      when: "currentversion['stdout'] != policy.3|string or files not in currentfiles or (files in currentfiles and '../definitions/templates/asmpolicies/bigiq-managed' + policy.1 + '.xml-' + version not in currentfiles['files']|map(attribute='path')|list)"
+
+      with_items: "{{environmentvars['asmpolicy']['downloadversions']}}"
+      loop_control:
+       loop_var: version
+
+    - name: set current version
+      shell: etcdctl set /inventory/f5/asmpolicies/bigiq-managed{{policy.1}}/version/current {{policy.3}}
+
+...

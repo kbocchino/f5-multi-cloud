@@ -1,0 +1,347 @@
+---
+
+
+# pick an instance we want to talk with
+
+
+    - name: get list of bigiqmgmtips
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{device}}/instances | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;' | awk -F/ '$9 ~ "Error" || $9 == "false" { print $8}' | xargs -n 1 -I% sh -c 'etcdctl get inventory/f5/deployments/devices/{{ device }}/instances/%/mgmtip'
+      register: bigiqmgmtips
+
+    - debug: var=bigiqmgmtips
+
+#add logic to figure out which one is up and active
+
+    - set_fact:
+       bigiqmgmtip: "{{bigiqmgmtips['stdout_lines']|first}}"
+ 
+    - name: get bigiqapiusername
+      shell: etcdctl get /inventory/f5/deployments/devices/{{device }}/creds/apiusername || true
+      register: bigiqapiusername
+      
+    - debug: var=bigiqapiusername
+      
+    - name: get bigiqinstancecredsfile
+      shell: etcdctl get /inventory/f5/deployments/devices/{{ device }}/creds/path || true
+      register: bigiqinstancecredsfile
+      
+    - debug: var=bigiqinstancecredsfile
+      
+      
+    - name: load instance creds file
+      include_vars:
+       file: "../definitions/creds/{{ bigiqinstancecredsfile['stdout'] }}"
+       name: bigiqinstancecredsvars
+     
+    - debug: var=bigiqinstancecredsvars
+ 
+ #get device list using this bigiq
+
+    - name: get list of mgmtips
+      shell: etcdctl ls /inventory/f5/deployments/devices/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/bigiq/name 2>&1;' | awk -F/ '$7 == "{{device}}" { print $6}' | grep -v '/$' | xargs -n 1 -I% sh -c 'etcdctl ls /inventory/f5/deployments/devices/%/instances' | grep -v '/$' | xargs -n 1 -I% sh -c 'etcdctl get %/mgmtip' 
+      register: mgmtips
+
+    - debug: var=mgmtips
+
+ 
+    - name: get bigiq-auth
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/shared/authn/login"
+       method: POST
+       body: "{username: {{bigiqapiusername['stdout']}}, password:{{bigiqinstancecredsvars[bigiqapiusername['stdout']]['password']}}}"
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      register: bigiqauthtokenrequest
+ 
+    - debug: var=bigiqauthtokenrequest['json']['token']['token']
+  
+    - set_fact:
+       bigiqauthtoken: "{{bigiqauthtokenrequest['json']['token']['token']}}"
+
+
+    - name: get devicelinks
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/system/machineid-resolver"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdevicelookup
+
+
+    - set_fact:
+       devicerefasm: []
+       devicerefltm: []
+       deviceref: []
+       machineids: []
+
+    - set_fact:
+       devicerefasm: "{{devicerefasm + [{'link':'https://localhost/mgmt/shared/resolver/device-groups/cm-asm-allAsmDevices/devices/' + link.0}] }}"
+       devicerefltm: "{{devicerefltm + [{'link':'https://localhost/mgmt/shared/resolver/device-groups/cm-adccore-allbigipDevices/devices/' + link.0}] }}"
+       deviceref: "{{deviceref + [{'link':link.2}] }}"
+       machineids: "{{machineids + [ link.0 ] }}"
+      with_together: 
+       - "{{bigiqdevicelookup['json']['items']|map(attribute='machineId')|list}}"
+       - "{{bigiqdevicelookup['json']['items']|map(attribute='address')|list}}"
+       - "{{bigiqdevicelookup['json']['items']|map(attribute='selfLink')|list}}"
+      loop_control:
+       loop_var: link
+      when: link.1 in mgmtips['stdout_lines']
+
+    - debug: var=deviceref
+    - debug: var=devicerefasm
+    - debug: var=devicerefltm
+    - debug: var=machineids
+
+
+
+
+    - name: get rootlinks
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/working-config/root-node/"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqrootlookup
+
+
+    - set_fact:
+       rootref: []
+
+    - set_fact:
+       rootref: "{{rootref + [{'link': link.0}] }}"
+      with_together:
+       - "{{bigiqrootlookup['json']['items']|map(attribute='selfLink')|list}}"
+       - "{{bigiqrootlookup['json']['items']|map(attribute='deviceReference')|list}}"
+      loop_control:
+       loop_var: link
+      when: link.1.id in machineids
+
+    - debug: var=rootref
+
+
+
+
+
+
+
+
+##########
+#certs
+
+    - name: get certids
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/working-config/sys/file/ssl-cert/"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqcertlookup
+
+
+    - set_fact:
+       certref: []
+
+    - set_fact:
+       certref: "{{certref + [{'link': link.0}] }}"
+      with_together:
+       - "{{bigiqcertlookup['json']['items']|map(attribute='selfLink')|list}}"
+      loop_control:
+       loop_var: link
+
+    - debug: var=certref
+
+    - name: get keyids
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/working-config/sys/file/ssl-key/"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqkeylookup
+
+
+    - set_fact:
+       keyref: []
+
+    - set_fact:
+       keyref: "{{keyref + [{'link': link.0}] }}"
+      with_together:
+       - "{{bigiqkeylookup['json']['items']|map(attribute='selfLink')|list}}"
+      loop_control:
+       loop_var: link
+
+    - debug: var=keyref
+
+    - name: update cert/key assignments
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/working-config/root-node/{{root.id}}"
+       method: PUT
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       body: "{{root|combine({'sslKeyReferences':keyref , 'sslCertReferences':certref})}}"
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      with_items: "{{bigiqrootlookup['json']['items']}}"
+      loop_control:
+       loop_var: root
+      when: "root.deviceReference.machineId in machineids"
+
+
+    - name: create ltm deployment
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/tasks/deploy-configuration"
+       method: POST
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       body:
+        skipVerifyConfig: false
+        skipDistribution: false
+        snapshotReference: null
+        objectsToDeployReferences: "{{certref|union(keyref)}}"
+        name: Multi-Cloud Deployment Push
+        deploySpecifiedObjectsOnly: false
+        deviceReferences: "{{devicerefltm}}"
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      ignore_errors: yes
+      register: bigiqltmdeployment
+
+    - name: get status
+      uri:
+       url: "{{bigiqltmdeployment.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqltmdeploymentlookup
+      until: bigiqltmdeploymentlookup.json.currentStep == "DONE"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+
+
+###########
+#policies
+
+    - name: get policies
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/asm/working-config/policies"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqpolicies
+
+    - set_fact:
+       policyref: []
+
+    - set_fact:
+       policyref: "{{policyref + [{'link':link}] }}"
+      with_items: "{{bigiqpolicies['json']['items']|map(attribute='selfLink')|list}}"
+      loop_control:
+       loop_var: link
+
+    - debug: var=policyref
+ 
+
+
+    - name: get virtuals
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/asm/working-config/virtual-servers?$filter=('isInactivePoliciesHolder'+eq+'true')"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqvirtuals
+
+
+    - debug: var=bigiqvirtuals['json']['items']
+
+
+    - set_fact:
+       virtualref: []
+
+    - set_fact:
+       virtualref: "{{virtualref + [{'link':link}] }}"
+      with_items: "{{bigiqvirtuals['json']['items']|map(attribute='selfLink')|list}}"
+      loop_control:
+       loop_var: link
+
+    - debug: var=virtualref
+
+
+    - name: update policy assignments
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/asm/working-config/virtual-servers/{{virtual.id}}"
+       method: PUT
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       body: "{{virtual|combine({'attachedPoliciesReferences':policyref})}}"
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      with_items: "{{bigiqvirtuals['json']['items']}}"
+      loop_control:
+       loop_var: virtual
+      when: "virtual.deviceReference.machineId in machineids"
+
+
+    - name: create asm deployment
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/asm/tasks/deploy-configuration"
+       method: POST
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       body:
+        skipVerifyConfig: false
+        skipDistribution: false
+        snapshotReference: null
+        objectsToDeployReferences: "{{virtualref}}"
+        name: Multi-Cloud Deployment Push
+        deploySpecifiedObjectsOnly: false
+        deviceReferences: "{{devicerefasm}}"
+        createChildTasks: true
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      ignore_errors: yes
+      register: bigiqasmdeployment
+
+    - name: get status
+      uri:
+       url: "{{bigiqasmdeployment.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqasmdeploymentlookup
+      until: bigiqasmdeploymentlookup.json.currentStep == "DONE"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+...

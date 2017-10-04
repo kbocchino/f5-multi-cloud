@@ -1,0 +1,12 @@
+
+---
+- name: License the bigip using Ansible Module
+  delegate_to: localhost
+  bigip_license:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    key: "{{ regkey['stdout'] }}"
+  ignore_errors: yes
+- name: set licensed state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/licensed/state/current true

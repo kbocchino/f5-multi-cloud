@@ -1,0 +1,391 @@
+---
+- hosts: localhost 
+  connection: local
+  pre_tasks:
+    - debug: var=fileinput
+
+    - name: load environment
+      include_vars:
+         file: "../definitions/environment.yml"
+         name: environmentvars
+ 
+    - name: load ipam
+      include_vars:
+         file: "../definitions/ipam.yml"
+         name: ipamvars
+
+    - debug: var=ipamvars
+
+   
+    - name: load instance details
+      include_vars:
+         file: "{{ fileinput }}"
+         name: instancevars
+
+    - debug: var=instancevars
+
+    - name: load provider file
+      include_vars:
+         file: "../definitions/providers/{{ instancevars['provider'] }}.yml"
+         name: providervars
+
+    - debug: var=providervars
+
+    - name: load version info
+      include_vars:
+         file: "../definitions/versions.yml"
+         name: versionvars
+
+    - debug: var=versionvars
+
+    - name: load size info
+      include_vars:
+         file: "../definitions/sizes.yml"
+         name: sizevars
+
+    - debug: var=sizevars
+
+
+    - name: load creds file
+      include_vars:
+         file: "../definitions/creds/{{ providervars['creds'] }}"
+         name: credsvars
+      when: providervars['type'] != "physical" and instancevars['mode'] == "managed"
+
+    - debug: var=credsvars
+      when: providervars['type'] != "physical" and instancevars['mode'] == "managed"
+
+
+    - name: load instance creds file
+      include_vars:
+         file: "../definitions/creds/{{ instancevars['creds'] }}"
+         name: instancecredsvars
+
+    - debug: var=instancecredsvars
+
+
+    - name: get current state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/deployed/state/current || true
+      register: deployedstatecurrent
+
+    - debug: var=deployedstatecurrent
+
+
+#setup version 
+
+
+    - name: get current version
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/version/current || true
+      register: currentversion
+
+    - debug: var=currentversion
+
+    - name: set first current version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/version/current {{instancevars['version']}}
+      when: currentversion['stdout'] == "" and instancevars['mode'] == "managed"
+
+    - name: set first acting version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/version/acting {{instancevars['version']}}
+      when: currentversion['stdout'] == "" and instancevars['mode'] == "managed"
+
+    - name: get current version
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/version/current || true
+      register: currentversion
+
+    - debug: var=currentversion
+
+    - name: set desired version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/version/desired {{instancevars['version']}}
+      when: instancevars['mode'] == "managed"
+
+#need to set generation up
+
+
+    - name: get current generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current || true
+      register: currentgeneration
+
+    - debug: var=currentgeneration
+
+    - name: set first acting generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/acting 0
+      when: currentgeneration['stdout'] == ""
+
+    - name: set first current generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current 0
+      when: currentgeneration['stdout'] == ""
+
+    - name: set first desired generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/desired 0
+      when: currentgeneration['stdout'] == ""
+
+    - name: get current generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current || true
+      register: currentgeneration
+
+    - debug: var=currentgeneration
+
+    - name: set next gen if version changes will add other things that will force gen +
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/desired {{currentgeneration['stdout'] | int + 1}}
+      when: "'version' in instancevars and currentversion['stdout'] != instancevars['version'] and instancevars['mode'] == 'managed'"
+
+    - name: get desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/desired || true
+      register: desiredgeneration
+
+##########set undesired instances for nuking
+
+    - name: get list of instances not in the current generation
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/generation; echo;' | awk -F/ '$9 != "{{desiredgeneration['stdout']}}" { print $8}' || true
+      register: undesiredgenerationinventory
+
+    - debug: var=undesiredgenerationinventory
+
+    - name: set nuke desired
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/nuked/state/desired true
+      with_items: "{{undesiredgenerationinventory['stdout_lines']}}"
+      vars:
+        instanceuuid: "{{ item }}"
+      when: instanceuuid != "" and instancevars['mode'] == "managed"
+
+############################################
+
+
+
+#set etcd stuff
+    - name: set provider details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/provider/name {{ instancevars['provider'] }}
+
+    - name: set type
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/type {{ instancevars['type'] }}
+
+
+    - name: set l7placements
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/allowautoplacement {{ instancevars['allowautoplacment']|default('yes') }}
+      when: instancevars['type'] == "bigip"
+
+
+    - name: set bigiq
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/bigiq/name {{ instancevars['bigiq'] }}
+      when: "instancevars['type'] == 'bigip' and 'bigiq' in instancevars"
+
+
+    - name: set scaling provider details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/scalingprovider/name {{ instancevars['scalingprovider'] }}
+      when: "'scalingprovider' in instancevars"
+
+    - name: clear scaling provider details
+      shell: etcdctl rm -r /inventory/f5/deployments/devices/{{instancevars['name']}}/scalingprovider || true
+      when: "'scalingprovider' not in instancevars"
+
+
+    - name: set instancecred details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/creds/path {{ instancevars['creds'] }}
+
+
+    - name: set instancecred details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/creds/apiusername {{ instancevars['apiusername'] }}
+
+    - name: set instancemode details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/mode {{ instancevars['mode'] }}
+
+
+    - name: set instancehamode details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/hamode {{ instancevars['hamode'] }}
+      when: "'hamode' in instancevars"
+
+    - name: set instancehamode details
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/hamode standalone
+      when: "'hamode' not in instancevars"
+
+    - name: set desired count
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instancecount/desired {{ instancevars['instancecountdesired'] }}
+      register: desiredinstancecount
+      when: instancevars['mode'] == "managed"
+
+    - name: get current count
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instancecount/current || true
+      register: currentinstancecount
+      when: instancevars['mode'] == "managed"
+
+#need to get an inventory of the desired gen
+    - name: get current generation list
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/generation; echo;' | awk -F/ '$9 == "{{desiredgeneration['stdout']}}" { print $8}' || true
+      register: currentdesiredgenerationinventory
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=currentdesiredgenerationinventory
+      when: instancevars['mode'] == "managed"
+
+    - debug: var={{currentdesiredgenerationinventory['stdout_lines'] | length }}
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=instancevars['instancecountdesired']
+      when: instancevars['mode'] == "managed"
+
+    - name: set desireddesiredgenerationinventory
+      set_fact:
+       desireddesiredgenerationinventory: "{{currentdesiredgenerationinventory['stdout_lines']}}"
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=desireddesiredgenerationinventory
+      when: instancevars['mode'] == "managed"
+
+    - name: add addtional instances 
+      with_sequence: count={{instancevars['instancecountdesired'] - currentdesiredgenerationinventory['stdout_lines'] | length }}
+      include_role:
+        name: f5-instance-inventory-gen
+      ignore_errors: yes
+      when: instancevars['instancecountdesired'] > {{currentdesiredgenerationinventory['stdout_lines'] | length }} and instancevars['mode'] == "managed"
+
+    - debug: var=desireddesiredgenerationinventory
+      when: instancevars['mode'] == "managed"
+
+
+
+##scale down logic
+
+    - name: get desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/desired || true
+      register: desiredgeneration
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=desiredgeneration
+      when: instancevars['mode'] == "managed"
+
+    - name: get desired instancecount
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instancecount/desired || true
+      register: desiredinstancecount
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=desiredinstancecount
+      when: instancevars['mode'] == "managed"
+
+    - name: get current generation list
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/generation; echo;' | awk -F/ '$9 == "{{desiredgeneration['stdout']}}" { print $8}' || true
+      register: currentdesiredgenerationinventory
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=currentdesiredgenerationinventory
+      when: instancevars['mode'] == "managed"
+
+    - name: get inventory of nonnuked set for the desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/nuked/state/desired || true
+      register: currentdesiredgenerationinventorydesirednukedstate
+      with_items: "{{currentdesiredgenerationinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=currentdesiredgenerationinventorydesirednukedstate
+      when: instancevars['mode'] == "managed"
+
+## we should add some more logic to go after the least ready devices first vs random 
+
+
+    - name: clear currentdesiredgenerationinventory_nonnuke
+      set_fact:
+       currentdesiredgenerationinventory_nonnuke: []
+
+    - name: set currentdesiredgenerationinventory_nonnuke
+      set_fact:
+       currentdesiredgenerationinventory_nonnuke: "{{ currentdesiredgenerationinventory_nonnuke }} + [ '{{ results['instanceuuid'] }}' ]"
+      when: "results is defined and 'rc' in results and results.stdout == '' and instancevars['mode'] == 'managed'"
+      with_items: "{{ currentdesiredgenerationinventorydesirednukedstate.results }}"
+      loop_control:
+       loop_var: results
+
+    - debug: var=currentdesiredgenerationinventory_nonnuke
+      when: instancevars['mode'] == "managed"
+
+    - name: set current count
+      set_fact:
+       currentinstancecount_nonnuke: "{{currentdesiredgenerationinventory_nonnuke | length}}"
+      when: instancevars['mode'] == "managed"
+
+    - debug: var=currentinstancecount_nonnuke
+      when: instancevars['mode'] == "managed"
+
+    - name: mark extra instances nuke desired state true
+      with_sequence: count={{ currentinstancecount_nonnuke | int - desiredinstancecount['stdout'] | int }}
+      loop_control:
+       loop_var: id
+
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{currentdesiredgenerationinventory_nonnuke[id | int - 1 ]}}/nuked/state/desired true
+      ignore_errors: yes
+      when: desiredinstancecount['stdout'] < currentinstancecount_nonnuke and instancevars['mode'] == "managed"
+
+
+#######end scale down
+
+
+
+
+
+
+
+#allocation of the license key per deployment
+
+    - name: allocate key
+      with_items: "{{ desireddesiredgenerationinventory }}"
+      include_role:
+        name: f5-license-allocate
+      vars:
+        instanceuuid: "{{ item }}"
+      when: instancevars['mode'] == "managed"
+
+
+#deploy compute
+#
+    - name: deploy vsphere
+      with_items: "{{ desireddesiredgenerationinventory }}"
+      include_role:
+        name: vsphere-deployment
+      vars:
+        instanceuuid: "{{ item }}"
+      when: providervars['type'] == "vsphere" and instancevars['mode'] == "managed"
+
+    - name: deploy aws
+      with_items: "{{ desireddesiredgenerationinventory }}"
+      include_role:
+        name: aws-deployment
+      vars:
+        instanceuuid: "{{ item }}"
+      when: providervars['type'] == "aws" and instancevars['mode'] == "managed"
+
+    - name: deploy azure
+      with_items: "{{ desireddesiredgenerationinventory }}"
+      include_role:
+        name: azure-deployment
+      vars:
+        instanceuuid: "{{ item }}"
+      when: providervars['type'] == "azure" and instancevars['mode'] == "managed"
+
+#setup etcd records for unmanaged devices
+
+    - name: deploy unmanaged
+      with_items: "{{ instancevars['subnets']['mgmt']['ips'] }}"
+      include_role:
+        name: unmanaged-deployment
+      loop_control:
+        loop_var: instanceuuid
+      when: instancevars['mode'] == "unmanaged"
+
+
+#onboarding
+#
+
+    - name: onboard systems
+      with_items: "{{ desireddesiredgenerationinventory }}"
+      include_role:
+        name: f5-onboarding
+      vars:
+        instanceuuid: "{{ item }}"
+      when: instancevars['mode'] == "managed"
+
+
+#we should add logic to only do this after onboarding is succesful
+    - name: set acting generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/acting {{desiredgeneration['stdout']}}
+      when: instancevars['mode'] == "managed"
+...

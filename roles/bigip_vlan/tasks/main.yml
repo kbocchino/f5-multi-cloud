@@ -1,0 +1,35 @@
+---
+# ----------------------------------------------------------------------
+# Configure basic network services that are the same across all devices.
+# ----------------------------------------------------------------------
+
+# Example of setting database variables
+#  Here we use a loop to retry until this first attempt to 
+#  provision using REST completes. This is our first REST call
+#  so we want to be sure the device is ready.
+
+- name: configure vlan
+  delegate_to: localhost
+  bigip_vlan:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}" 
+    name: "{{ subnet }}"
+    untagged_interfaces: "{{instancevars['subnets'][subnet]['interfaces']['untagged']|default('')}}"
+  when: instancevars['subnets'][subnet]['interfaces']['untagged']|default('') != ""
+
+
+- name: configure vlan
+  delegate_to: localhost
+  bigip_vlan:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    name: "{{ subnet }}"
+    tagged_interfaces: "{{instancevars['subnets'][subnet]['interfaces']['tagged']|default('')}}"
+    tag: "{{instancevars['subnets'][subnet]['interfaces']['tag']|default('')}}"
+  when: instancevars['subnets'][subnet]['interfaces']['tagged']|default('') != ""
+
+
+- name: set vlan state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/vlan/state/current true

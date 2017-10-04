@@ -1,0 +1,38 @@
+---
+# tasks file for bigip_ready
+
+- name: Poll BIG-IP failover.linksup
+  uri:
+    url: "https://{{ mgmtip['stdout'] }}/mgmt/tm/sys/db/failover.linksup"
+    status_code: 200
+    timeout: 300
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}" 
+    validate_certs: no
+    return_content: yes
+  until: bigip_failover_linksup.status == 200
+  retries: 20
+  delay: 10
+  register: bigip_failover_linksup
+  tags: bigip_ready
+  when: credentialedstatecurrent['stdout'] == "true"
+
+- name: Poll BIG-IP failover.linksup
+  uri:
+    url: "https://{{ mgmtip['stdout'] }}/mgmt/tm/sys/db/failover.linksup"
+    status_code: 200
+    timeout: 300
+    user: "admin"
+    password: "admin"
+    validate_certs: no
+    return_content: yes
+  until: bigip_failover_linksup.status == 200
+  retries: 20
+  delay: 10
+  register: bigip_failover_linksup
+  tags: bigip_ready
+  when: credentialedstatecurrent['stdout'] != "true"
+
+
+- debug: var=bigip_failover_linksup
+...

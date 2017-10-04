@@ -1,0 +1,73 @@
+config:
+ iapp__strictUpdates: enabled
+ iapp__appStats: disabled
+ iapp__mode: auto
+ iapp__logLevel: 10
+ iapp__routeDomain: auto
+ iapp__asmDeployMode: preserve-bypass
+ iapp__apmDeployMode: preserve-bypass
+ pool__addr: 
+ pool__mask: 255.255.255.255
+ pool__port: 
+ pool__DefaultPoolIndex: 0
+ vs__Name: 
+ vs__Description: 
+ vs__SourceAddress:
+ vs__IpProtocol: tcp
+ vs__ConnectionLimit: 0
+ vs__ProfileClientProtocol: /Common/tcp-wan-optimized
+ vs__ProfileServerProtocol: /Common/tcp-lan-optimized
+ vs__ProfileHTTP: 
+ vs__ProfileOneConnect: 
+ vs__ProfileCompression: 
+ vs__ProfileAnalytics: 
+ vs__ProfileRequestLogging: 
+ vs__ProfileDefaultPersist: 
+ vs__ProfileFallbackPersist: 
+ vs__SNATConfig: automap
+ vs__ProfileServerSSL: 
+ vs__ProfileClientSSL: 
+ vs__ProfileClientSSLCert: 
+ vs__ProfileClientSSLKey: 
+ vs__ProfileClientSSLChain: 
+ vs__ProfileClientSSLCipherString: 
+ vs__ProfileClientSSLAdvOptions: 
+ vs__ProfileSecurityLogProfiles: 
+ vs__ProfileSecurityIPBlacklist: none
+ vs__ProfileSecurityDoS: 
+ vs__ProfileAccess: 
+ vs__ProfileConnectivity: 
+ vs__ProfilePerRequest: 
+ vs__OptionSourcePort: preserve
+ vs__OptionConnectionMirroring: disabled
+ vs__Irules: 
+ vs__AdvOptions: 
+ vs__AdvProfiles: 
+ vs__AdvPolicies: 
+ l7policy__strategy: /Common/first-match
+ l7policy__defaultASM: bypass
+ l7policy__defaultL7DOS: bypass
+ feature__statsTLS: auto
+ feature__statsHTTP: auto
+ feature__insertXForwardedFor: auto
+ feature__redirectToHTTPS: auto
+ feature__sslEasyCipher: disabled
+ feature__securityEnableHSTS: disabled
+ feature__easyL4Firewall: auto
+ extensions__Field1: 
+ extensions__Field2: 
+ extensions__Field3: 
+ feature__easyL4FirewallSourceList:
+  - CIDRRange: 0.0.0.0/0
+ monitor__Monitors:
+  - Index: 0
+    Name: /Common/tcp
+    Type: none
+    Options: none
+ pool__Pools:
+  - Index: 0
+    Name:
+    Description:
+    LbMethod: round-robin
+    Monitor: 0
+    AdvOptions: none

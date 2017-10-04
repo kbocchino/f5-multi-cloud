@@ -1,0 +1,24 @@
+etcdhost: 10.192.75.120
+etcdport: 2379
+bigipscaledownmethod: drain-disabled
+templates:
+ f5:
+  iapps:
+   - template: appsvcs_integration
+     active: yes
+     name: appsvcs_integration_v2.0.004
+     path: ../definitions/templates/appsvcs_integration_v2.0.004.tmpl
+     version: 2.0.004
+   - template: f5.analytics
+     active: yes
+     name: f5.analytics.v3.7.1rc2
+     path: ../definitions/templates/f5.analytics.v3.7.1rc2.tmpl 
+     version: 3.7.1rc2
+   - template: f5.analytics
+     name: f5.analytics.v3.7.1rc1
+     path: ../definitions/templates/f5.analytics.v3.7.1rc1.tmpl
+     version: 3.7.1rc1
+bigiq:
+ retry:
+  count: 30
+  delay: 10

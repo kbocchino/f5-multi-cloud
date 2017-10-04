@@ -1,0 +1,64 @@
+networks:
+ vsphere-sjc:
+  subnets:
+   dataOne:
+    ipamprovider: etcd
+    subnetmask: 255.255.0.0
+    gateway: 172.17.0.1
+    ipblock:
+     start: 172.17.10.1
+     end: 172.17.10.255
+    reservedips:
+     172.17.10.3
+     172.17.10.3
+   dataTwo:
+    ipamprovider: etcd
+    subnetmask: 255.255.0.0
+    gateway: 172.18.0.1
+    ipblock:
+     start: 172.18.10.1
+     end: 172.18.10.255
+    reservedips:
+     172.18.10.3
+ vsphere-sjc2:
+  subnets:
+   dataOne:
+    ipamprovider: etcd
+    subnetmask: 255.255.0.0
+    gateway: 172.17.0.1
+    ipblock:
+     start: 172.17.110.1
+     end: 172.17.110.255
+    reservedips:
+     172.17.110.3
+     172.17.110.3
+   dataTwo:
+    ipamprovider: etcd
+    subnetmask: 255.255.0.0
+    gateway: 172.18.0.1
+    ipblock:
+     start: 172.18.110.1
+     end: 172.18.110.255
+    reservedips:
+     172.18.110.3
+ phy-sjc:
+  subnets:
+   dataOne:
+    ipamprovider: etcd
+    subnetmask: 255.255.0.0
+    gateway: 172.17.0.1
+    ipblock:
+     start: 172.17.200.1
+     end: 172.17.200.255
+    reservedips:
+     172.17.200.3
+     172.17.200.3
+   dataTwo:
+    ipamprovider: etcd
+    subnetmask: 255.255.0.0
+    gateway: 172.18.0.1
+    ipblock:
+     start: 172.18.210.1
+     end: 172.18.210.255
+    reservedips:
+     172.18.210.3

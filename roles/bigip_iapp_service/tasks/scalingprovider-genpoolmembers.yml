@@ -1,0 +1,23 @@
+---
+
+- name: setup tcp poolmembers
+  set_fact:
+   poolmemberyml: "{{poolmemberyml + [{'Index': key.0.split('|').4 + '-tcp-' + key.1|string, 'IPAddress': key.0.split('|').5, 'Port': key.1, 'ConnectionLimit': 0, 'Ratio': 1, 'PriorityGroup': 0, 'State': currentvipipsstatelookup[key.0]|default('enabled'), 'AdvOptions': 'none'}]}}"
+  with_nested: 
+   - "{{ currentvipip }}"
+   - "{{ currentvipipsportlookup[currentvipip]}}"
+  loop_control:
+   loop_var: key 
+  when: "currentvipipsstatelookup[key.0] is not defined or scalingproviderprocessmode == 'pave'"
+
+# prep for pools
+
+- name: append array for pools and vips
+  set_fact:
+   poolviplist: "{{poolviplist + [key.0.split('|').4 + '|tcp|' + key.1|string]}}"
+  with_nested:
+   - "{{currentvipip}}"
+   - "{{currentvipipsportlookup[currentvipip]}}"
+  loop_control:
+   loop_var: key
+...

@@ -1,0 +1,8 @@
+---
+- name: Save the running configuration of the BIG-IP
+  bigip_config:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    save: yes
+...

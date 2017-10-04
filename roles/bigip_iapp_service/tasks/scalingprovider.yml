@@ -1,0 +1,394 @@
+
+---
+
+- name: get mgmtip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/instances/{{instanceuuid}}/mgmtip || true
+  register: mgmtip
+
+- debug: var=mgmtip
+
+- name: get apiusername
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/creds/apiusername || true
+  register: apiusername
+
+- debug: var=apiusername
+
+- name: get instancecredsfile
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/creds/path || true
+  register: instancecredsfile
+
+- debug: var=instancecredsfile
+
+
+- name: load instance creds file
+  include_vars:
+     file: "../definitions/creds/{{ instancecredsfile['stdout'] }}"
+     name: instancecredsvars
+
+
+- name: get templatename
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/instances/{{instanceuuid}}/templates/iapps/{{scalingprovidervars['template']}}/active/name/current || true
+  register: templatename
+
+- debug: var=templatename
+
+- set_fact:
+   configtemplatevars: []
+   configtemplateparentvars: []
+   fromiapparray: []
+   toarray: []
+
+- name: load configtemplate file
+  include_vars:
+     file: "{{scalingprovidervars['configtemplate']}}"
+     name: configtemplatevarsfile
+  when: "'configtemplate' in scalingprovidervars"
+
+- set_fact:
+   configtemplatevars: "{{configtemplatevarsfile}}"
+  when: "'configtemplate' in scalingprovidervars"
+
+
+
+
+- name: load configtemplateparent file
+  include_vars:
+     file: "{{configtemplatevars['configtemplate']}}"
+     name: configtemplateparentvarsfile
+  when: "configtemplatevars is iterable and 'configtemplate' in configtemplatevars"
+
+- set_fact:
+   configtemplateparentvars: "{{configtemplateparentvarsfile}}"
+  when: "configtemplatevars is iterable and 'configtemplate' in configtemplatevars"
+
+- debug: var=iappdeploypassthrough_componet['configtemplate']
+- debug: var=configtemplatevars['configtemplate']
+
+- debug: var=configtemplateparentvars
+- debug: var=configtemplatevars
+- debug: var=scalingprovidervars['config']
+
+- set_fact:
+   fromiapparray: "{{configtemplatevars['config']|combine(scalingprovidervars['config'])}}"
+  when: "configtemplatevars is iterable and 'configtemplate' in scalingprovidervars"
+
+- set_fact:
+   fromiapparray: "{{configtemplateparentvars['config']|combine(configtemplatevars['config']|combine(scalingprovidervars['config']))}}"
+  when: "configtemplatevars is iterable and 'configtemplate' in configtemplatevars"
+
+- set_fact:
+   fromiapparray: "{{scalingprovidervars['config']}}"
+  when: "'configtemplate' not in scalingprovidervars"
+
+
+
+###########
+
+
+
+
+
+
+
+
+
+
+- debug: var=fromiapparray
+
+
+
+############ build virtual and pool table #################
+
+#get an inventory of vipip names
+
+
+- set_fact:
+   poolmemberyml: []
+   poolyml: []
+   vipyml: []
+   vipsubnames: []
+   currentvipipsportlookup: {}
+   currentvipipsstatelookup: {}
+   poolviplist: []
+
+- name: get inventory of vips
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/ | grep -v '/$' | xargs -n 1 -I% sh -c 'etcdctl ls %/;' | xargs -n 1 -I% sh -c 'etcdctl ls %/deployments;' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/scalingprovider/name/current 2>&1;' | awk -F/ '$14 == "{{ scalingprovidervars['name'] }}" { print $10 "/" $11 "/" $12 "/" $13}' | xargs -n 1 -I% sh -c 'etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/%/instances; ' | xargs -n 1 -I% sh -c 'etcdctl ls %/vipips 2>&1;' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/ip 2>&1;' | awk -F/ ' $18 !~ "Error" {print $10 "|" $11 "|" $13 "|" $15 "|" $17 "|" $18} '
+  register: currentvipips
+
+
+- debug: var=currentvipips
+
+
+
+
+
+
+#get an inventory of tcpports
+
+
+- name: set tcp port usage
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{key.split('|').0}}/{{key.split('|').1}}/deployments/{{key.split('|').2}}/instances/{{key.split('|').3}}/vipips/{{key.split('|').4}}/ports/tcp || true
+  with_items: "{{currentvipips['stdout_lines']}}"
+  loop_control:
+   loop_var: key
+  when: currentvipips['stdout'] != ""
+  register: tcpportlookup
+  
+  
+- debug: var=tcpportlookup
+
+
+- name: set tcp port usage array
+  set_fact:
+   currentvipipsportlookup: "{{currentvipipsportlookup|combine({result.key:result.stdout|from_json}) }}"
+  with_items: "{{tcpportlookup.results}}"
+  loop_control:
+   loop_var: result
+  when: currentvipips['stdout'] != ""
+
+- debug: var=currentvipipsportlookup
+
+
+- name: set instanceuuid pool member state
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{key.split('|').0}}/{{key.split('|').1}}/deployments/{{key.split('|').2}}/instances/{{key.split('|').3}}/nuked/state/desired | awk -F/ '$1 != "false" && $1 !~ "Error" {print $1}' || true
+  with_items: "{{currentvipips['stdout_lines']}}"
+  loop_control:
+   loop_var: key
+  when: currentvipips['stdout'] != ""
+  register: instanceuuidstatelookup
+
+
+- debug: var=instanceuuidstatelookup
+
+
+- name: set instanceuuid pool member state
+  set_fact:
+   currentvipipsstatelookup: "{{currentvipipsstatelookup|combine({result.key: environmentvars['bigipscaledownmethod']|default('drain-disabled')}) }}"
+  with_items: "{{instanceuuidstatelookup.results}}"
+  loop_control:
+   loop_var: result
+  when: currentvipips['stdout'] != "" and result.stdout != ""
+
+
+- name: set instance pool member state
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{key.split('|').0}}/{{key.split('|').1}}/deployments/{{key.split('|').2}}/nuked/state/desired | awk -F/ '$1 != "false" && $1 !~ "Error" {print $1}' || true
+  with_items: "{{currentvipips['stdout_lines']}}"
+  loop_control:
+   loop_var: key
+  when: currentvipips['stdout'] != ""
+  register: instancestatelookup
+
+
+- debug: var=instancestatelookup
+
+
+- name: set instance pool member state
+  set_fact:
+   currentvipipsstatelookup: "{{currentvipipsstatelookup|combine({result.key: environmentvars['bigipscaledownmethod']|default('drain-disabled')}) }}"
+  with_items: "{{instancestatelookup.results}}"
+  loop_control:
+   loop_var: result
+  when: currentvipips['stdout'] != "" and result.stdout != ""
+
+
+- debug: var=currentvipipsstatelookup
+
+
+
+
+# based on count of vips set/unset nukeing
+
+
+- name: set iapp service nuked state desired
+  command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/nuked/state/desired true
+  when: currentvipips['stdout'] == "" or currentvipips['stdout_lines']|length == currentvipipsstatelookup.keys()|length
+
+
+- debug: var=currentvipips['stdout_lines']|length
+- debug: var=currentvipipsstatelookup.keys()|length
+
+
+- name: remove nuked desired
+  shell: etcdctl rm -r /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/nuked || true
+  when: currentvipips['stdout'] != "" and currentvipips['stdout_lines']|length > currentvipipsstatelookup.keys()|length
+
+
+- name: get nuked desired
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/nuked/state/desired || true
+  register: desirednukedstate
+
+- debug: var=desirednukedstate
+
+
+- name: setup vipsubnames
+  set_fact:
+   vipsubnames: "{{vipsubnames + [key.split('|').4]}}"
+  with_list: "{{currentvipips['stdout_lines']}}"
+  loop_control:
+   loop_var: key      
+   
+- debug: var=vipsubnames
+
+
+- name: gen poolmembers for scaling provider
+  include_role:
+   name: bigip_iapp_service
+   tasks_from: scalingprovider-genpoolmembers
+  with_items: "{{currentvipips['stdout_lines']|sort}}"
+  loop_control:
+   loop_var: currentvipip
+
+- debug: var=poolmemberyml
+
+- name: setup pools
+  set_fact:
+   poolyml: "{{poolyml + [{'Index': key.split('|').0 + '-tcp-' + key.split('|').2|string, 'Name': key.split('|').0 + '-tcp-' + key.split('|').2|string, 'Description': 'scaling pool for ' + key.split('|').0 + '-tcp-' + key.split('|').2|string, 'LbMethod': fromiapparray['LbMethod_default'], 'Monitor': fromiapparray['Monitor_default'], 'AdvOptions': 'none'}]}}"
+  with_list: "{{poolviplist|unique|sort}}"
+  loop_control:
+   loop_var: key
+
+- debug: var=poolyml
+
+
+###ipam stuff
+
+- set_fact:
+   ipampassthrough_componet: "{{iappdeploypassthrough_componet}}"
+   currentscalingvipipsarray: []
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/vipips | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/ip 2>&1;  echo;' | awk -F/ '$17 != "" && $18 !~ "Error" {print $17 "{{":"}} " $18}' || true
+  register: currentscalingvipips
+
+- debug: var=currentscalingvipips
+- debug: var=currentscalingvipips['stdout']|from_yaml
+
+- set_fact:
+   currentscalingvipipsarray: "{{currentscalingvipips['stdout']|from_yaml}}"
+  when: currentscalingvipips['stdout'] != ""
+
+#figure out new
+
+- debug: var=vipsubnames|difference(currentscalingvipipsarray)
+
+  # loop through and allocate missing IP need to pass compo 
+
+- name: allocate new vipaddrs
+  include_role:
+   name: multi-cloud-ipam
+   tasks_from: iapp_allocation-scaling
+  with_items: "{{vipsubnames|difference(currentscalingvipipsarray)}}"
+  loop_control:
+   loop_var: vipsubname
+  when: desirednukedstate['stdout'] != "true"
+
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/vipips | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/ip 2>&1;  echo;' | awk -F/ '$17 != "" && $18 !~ "Error" {print $17 "{{":"}} " $18}' || true
+  register: currentscalingvipips
+
+- debug: var=currentscalingvipips
+- debug: var=currentscalingvipips['stdout']|from_yaml
+
+- set_fact:
+   currentscalingvipipsarray: "{{currentscalingvipips['stdout']|from_yaml}}"
+  when: currentscalingvipips['stdout'] != ""
+
+
+##
+
+#pick one vip to set as main
+
+- set_fact:
+   corevip: "{{poolviplist|unique|sort|first}}"
+
+- debug: var=corevip
+
+- set_fact:
+   fromiapparray: "{{ fromiapparray|combine({'pool__addr':currentscalingvipipsarray[corevip.split('|').0], 'pool__port': corevip.split('|').2|string, 'pool__DefaultPoolIndex': corevip.split('|').0 + '-tcp-' + corevip.split('|').2|string}) }}"
+
+
+- name: setup vips
+  set_fact:
+   vipyml: "{{vipyml + [{'Listener': currentscalingvipipsarray[key.split('|').0] + ':' + key.split('|').2|string, 'Destination': key.split('|').0 + '-tcp-' + key.split('|').2|string}]}}"
+  with_list: "{{poolviplist|unique|sort|difference(corevip)}}"
+  loop_control:
+   loop_var: key
+
+- debug: var=vipyml
+
+
+
+
+- set_fact:
+   fromiapparray: "{{ fromiapparray|combine({'pool__Pools':poolyml})|combine({'pool__Members':poolmemberyml}) }}"
+
+
+- set_fact:
+   fromiapparray: "{{ fromiapparray|combine({'vs__Listeners':vipyml}) }}"
+  when: vipyml|length > 0
+
+
+- name: get iapp service deployment hash
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/deploymenthash/current || true
+  register: currentdeploymenthash
+
+- debug: var=currentdeploymenthash
+
+- debug: var=fromiapparray|hash('md5')
+
+
+
+
+- name: get iapp service deployment template
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/template/name/current || true
+  register: currenttemplatename
+
+- debug: var=currenttemplatename
+- debug: var=templatename
+
+
+
+- debug: var=fromiapparray
+- debug: var=fromiapparray|iapp_yml_to_json
+  when: (desirednukedstate['stdout'] != "true" or scalingproviderprocessmode == "pave") and (currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout'])
+
+- debug: var=fromiapparray|iapp_yml_to_json|to_nice_json
+  when: (desirednukedstate['stdout'] != "true" or scalingproviderprocessmode == "pave") and (currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout'])
+
+#################
+
+
+
+
+
+- name: install iapp service
+  delegate_to: localhost
+  bigip_iapp_service:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ apiusername['stdout'] }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    state: "present"
+    force: yes
+    template: "{{templatename['stdout']}}"
+    name: "{{servicename}}__{{iappdeploypassthrough_componet}}__scalingprovider"
+    parameters: "{{fromiapparray|iapp_yml_to_json|to_json}}"
+  when: (desirednukedstate['stdout'] != "true" or scalingproviderprocessmode == "pave") and (currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout'])
+
+- debug: var=placementprovider
+- debug: var=placementdeployment
+- debug: var=iappdeploypassthrough_componet
+
+- name: set iapp service deployment
+  command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/template/name/current {{templatename['stdout']}}
+  when: (desirednukedstate['stdout'] != "true" or scalingproviderprocessmode == "pave") and (currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout'])
+
+- name: set iapp service deployment hash
+  command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/deploymenthash/current {{fromiapparray|hash('md5')}}
+  when: (desirednukedstate['stdout'] != "true" or scalingproviderprocessmode == "pave") and (currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout'])
+
+
+- name: set iapp service deployment type
+  command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/type bigip-l4
+
+...

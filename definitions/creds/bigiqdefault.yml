@@ -1,0 +1,6 @@
+admin:
+ username: admin
+ password: admin
+root:
+ username: root
+ password: default

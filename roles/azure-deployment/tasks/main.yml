@@ -1,0 +1,154 @@
+---
+# tasks file for azure
+#
+    - name: set instance id desired state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/desired true
+
+    - name: set instance id generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/generation {{desiredgeneration['stdout']}}
+
+    - name: set instance id version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/version {{instancevars['version']}}
+
+    - name: get current state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current || true
+      register: deployedstatecurrent
+
+    - name: get regkey
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/regkey || true
+      register: regkey
+
+    - debug: var=regkey
+
+
+    - debug: msg="Starting {{providervars['type']}} Deployment for {{instanceuuid}}"
+      when: deployedstatecurrent['stdout'] != "true"
+
+    - name: setoptionsjson azure
+      set_fact:
+         jsonoptionsazure: {
+                  "adminUsername": {
+                      "value": "{{instancecredsvars['admin']['username']}}"
+                  },
+                  "adminPassword": {
+                      "value": "{{instancecredsvars['admin']['password']}}"
+                  },
+                  "dnsLabel": {
+                      "value": "{{instancevars['name']}}-{{instanceuuid}}"
+                  },
+                  "instanceName": {
+                      "value": "{{instancevars['name']}}-{{instanceuuid}}"
+                  },
+                  "instanceType": {
+                      "value": "{{instancevars['size']}}"
+                  },
+                  "imageName": {
+                      "value": "{{instancevars['fixmeimagename']}}"
+                  },
+                  "bigIpVersion": {
+                      "value": "{{versionvars[instancevars['type']][providervars['type']][instancevars['version']]['build']}}"
+                  },
+                  "licenseKey1": {
+                      "value": "{{regkey['stdout']}}"
+                  },
+                  "vnetName": {
+                      "value": "{{instancevars['vnet']}}"
+                  },
+                  "vnetResourceGroupName": {
+                      "value": "{{instancevars['vnetresourcegroup']}}"
+                  },
+                  "mgmtSubnetName": {
+                      "value": "{{instancevars['networkmapping-mgmt']['name']}}"
+                  },
+                  "externalSubnetName": {
+                      "value": "{{instancevars['networkmapping-1']['name']}}"
+                  },
+                  "avSetChoice": {
+                      "value": "CREATE_NEW"
+                  },
+                  "ntpServer": {
+                      "value": "0.pool.ntp.org"
+                  },
+                  "timeZone": {
+                      "value": "UTC"
+                  },
+                  "restrictedSrcAddress": {
+                      "value": "*"
+                  },
+                  "tagValues": {
+                      "value": {
+                          "application": "APP",
+                          "cost": "COST",
+                          "environment": "ENV",
+                          "group": "GROUP",
+                          "owner": "OWNER"
+                      }
+                  }
+              }
+
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - debug: var=jsonoptionsazure
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: launch azure image
+      environment:
+       AZURE_CLIENT_ID: "{{ credsvars['client-id'] }}"
+       AZURE_SECRET: "{{ credsvars['client-secret'] }}"
+       AZURE_SUBSCRIPTION_ID: "{{ providervars['subscription-id'] }}"
+       AZURE_TENANT: "{{ providervars['tenant-id'] }}"
+      azure_rm_deployment:
+         state: present
+         resource_group_name: "{{ instancevars['name'] }}-{{instanceuuid}}"
+         template: "{{ lookup('file', versionvars[instancevars['type']][providervars['type']][instancevars['version']]['template'] ) }}"
+         parameters: "{{ jsonoptionsazure }}"
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+      register: deploy_output
+
+    - debug: var=deploy_output
+
+    - name: setting mgmtip fact
+      set_fact:
+          mgmtip: "{{ deploy_output.deployment.outputs.managementIP.value }}"
+
+    - debug: var=mgmtip
+
+#add validation here then set current state
+
+    - name: set deployed state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current true
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/desired true
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/current false
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state creds
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/credentialed/state/current true
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state licensed
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/licensed/state/current true
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state base
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/base/state/current true
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+
+    - name: set current generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current {{desiredgeneration['stdout']}}
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set mgmtip
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/mgmtip {{ mgmtip }}
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set current version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/version/current {{instancevars['version']}}
+      when: providervars['type'] == "azure" and deployedstatecurrent['stdout'] != "true"
+...

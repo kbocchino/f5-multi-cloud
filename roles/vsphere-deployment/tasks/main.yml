@@ -1,0 +1,191 @@
+---
+# tasks file for vsphere
+
+    - name: set instance id desired state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/desired true
+
+    - name: set instance id generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/generation {{desiredgeneration['stdout']}}
+
+    - name: set instance id version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/version {{instancevars['version']}}
+
+    - name: get current state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current || true
+      register: deployedstatecurrent
+
+    - debug: var=deployedstatecurrent
+
+    - debug: msg="Starting {{providervars['type']}} Deployment for {{instanceuuid}}"
+      when: deployedstatecurrent['stdout'] != "true"
+
+    - name: setoptionsjson
+      set_fact:
+         jsonoptions: "{
+    \"Deployment\": \"{{sizevars[providervars['type']][instancevars['size']]['deployment']}}\",
+    \"DiskProvisioning\": \"{{sizevars[providervars['type']][instancevars['size']]['diskprovisioning']}}\",
+    \"IPAllocationPolicy\": \"dhcpPolicy\",
+    \"IPProtocol\": \"IPv4\",
+    \"InjectOvfEnv\": false,
+    \"NetworkMapping\": [
+        {
+            \"Name\": \"Management\",
+            \"Network\": \"{{instancevars['interfacemappings']['mgmt']|default('')}}\"
+        },
+        {
+            \"Name\": \"Internal\",
+            \"Network\": \"{{instancevars['interfacemappings'][1.1]|default('')}}\"
+        },
+        {
+            \"Name\": \"External\",
+            \"Network\": \"{{instancevars['interfacemappings'][1.2]|default('')}}\"
+        },
+        {
+            \"Name\": \"HA\",
+            \"Network\": \"{{instancevars['interfacemappings'][1.3]|default('')}}\"
+        }
+    ],
+    \"PowerOn\": false,
+    \"WaitForIP\": false
+}"
+      when: instancevars['type'] == "bigip" and providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+
+    - name: setoptionsjson bigiq
+      set_fact:
+         jsonoptions: "{
+    \"Deployment\": \"{{sizevars[providervars['type']][instancevars['size']]['deployment']}}\",
+    \"DiskProvisioning\": \"{{sizevars[providervars['type']][instancevars['size']]['diskprovisioning']}}\",
+    \"IPAllocationPolicy\": \"dhcpPolicy\",
+    \"IPProtocol\": \"IPv4\",
+    \"InjectOvfEnv\": false,
+    \"NetworkMapping\": [
+        {
+            \"Name\": \"Management\",
+            \"Network\": \"{{instancevars['interfacemappings']['mgmt']|default('')}}\"
+        },
+        {
+            \"Name\": \"Internal\",
+            \"Network\": \"{{instancevars['interfacemappings'][1.1]|default('')}}\"
+        },
+        {
+            \"Name\": \"External\",
+            \"Network\": \"{{instancevars['interfacemappings'][1.2]|default('')}}\"
+        }
+    ],
+    \"PowerOn\": false,
+    \"WaitForIP\": false
+}"
+      when: instancevars['type'] == "bigiq" and providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+
+    - debug: var=jsonoptions
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - local_action: copy dest=./{{instanceuuid}}-vspheretemp.json content="{{jsonoptions}}"
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: Get info from F5
+      command: "govc vm.info {{instancevars['name']}}-{{instanceuuid}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+      ignore_errors: yes
+      register: govc_vm_info
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - debug: var=govc_vm_info
+
+    - name: Import OVA and deploy VM
+      command: "govc import.ova -name={{instancevars['name']}}-{{instanceuuid}} -options=./{{instanceuuid}}-vspheretemp.json {{versionvars[instancevars['type']][providervars['type']][instancevars['version']]['location']}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: remove temp file
+      command: rm ./{{instanceuuid}}-vspheretemp.json -f
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: Power on the VM
+      command: "govc vm.power -on {{instancevars['name']}}-{{instanceuuid}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set deployed state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current true
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: Get IP from F5
+      command: "govc vm.ip {{instancevars['name']}}-{{instanceuuid}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+      register: govc_vm_ip1
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: sleep wait for dhcp to fully kick in
+      command: "sleep 45"
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: Get IP from F5
+      command: "govc vm.ip {{instancevars['name']}}-{{instanceuuid}}"
+      environment:
+       GOVC_HOST: "{{ providervars['vsphere-host'] }}"
+       GOVC_URL: "{{ providervars['vsphere-sdk'] }}"
+       GOVC_USERNAME: "{{ credsvars['username'] }}"
+       GOVC_PASSWORD: "{{ credsvars['password'] }}"
+       GOVC_INSECURE: "{{ providervars['vsphere-insecure'] }}"
+       GOVC_DATACENTER: "{{ providervars['vsphere-datacenter'] }}"
+       GOVC_DATASTORE: "{{ providervars['vsphere-datastore'] }}"
+       GOVC_RESOURCE_POOL: "{{ providervars['vsphere-resource-pool'] }}"
+      register: govc_vm_ip2
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true" 
+
+    - name: set managmentip
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/mgmtip {{ govc_vm_ip2['stdout'] }}
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/desired true
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/current false
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set current generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current {{desiredgeneration['stdout']}}
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set current version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/version/current {{instancevars['version']}}
+      when: providervars['type'] == "vsphere" and deployedstatecurrent['stdout'] != "true"
+
+...

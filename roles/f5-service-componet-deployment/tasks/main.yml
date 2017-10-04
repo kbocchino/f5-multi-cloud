@@ -1,0 +1,58 @@
+---
+# tasks file for f5-service-componet-deployment
+
+    - debug: var=componet
+
+
+    - name: loop through placement
+      include_role:
+        name: f5-service-componet-placement-deployment
+      with_items: "{{ componet['placement']}}"
+      loop_control:
+       loop_var: placement
+
+#unset the componet for nukedesired based on the fact that we were just asked to build it
+
+    - name: clear componet from being nuked
+      shell: etcdctl rm -r /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/nuked || true
+
+
+#need to add true up for placement moves here
+
+    - name: get provider and device inventory
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/ | awk -F/ '{ print $10}' | xargs -n 1 -I% sh -c 'etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/%/{{componet['template']}}/deployments/;  echo;' | awk -F/ '$10 != "" {print "- " $10 "{{":"}} " $13}' || true
+      register: currentproviderinstanceinventory
+
+
+    - debug: var=componet['placement']
+    - debug: var=currentproviderinstanceinventory
+
+
+    - name: true up provider inventory placements for dynamic deployments
+      set_fact:
+        currentdynamicproviderinstanceinventory: []
+
+    - name: true up provider inventory placements for dynamic deployments
+      set_fact:
+        currentdynamicproviderinstanceinventory: "{{ currentdynamicproviderinstanceinventory + [{placementtrueup.1.keys().0: placementtrueup.1.values().0 }]}}"
+      with_nested:
+       - "{{ componet['placement'] }}"
+       - "{{ currentproviderinstanceinventory['stdout']|from_yaml|difference(componet['placement']) }}"
+      loop_control:
+       loop_var: placementtrueup
+      when: placementtrueup.0 is string and placementtrueup.0 == placementtrueup.1.keys().0
+
+
+
+
+    - name: true up current with availible placement inventory set for nuke
+      command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementtrueup.keys().0}}/{{componet['template']}}/deployments/{{placementtrueup.values().0}}/nuked/state/desired true
+      loop_control:
+       loop_var: placementtrueup
+      with_items: "{{ currentproviderinstanceinventory['stdout']|from_yaml|difference(componet['placement'])|difference(currentdynamicproviderinstanceinventory) }}"
+
+
+
+ #deploy dns?
+
+...

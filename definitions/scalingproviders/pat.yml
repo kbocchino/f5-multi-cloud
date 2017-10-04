@@ -1,0 +1,10 @@
+name: pat
+type: bigip-l4
+instancename: pat
+template: appsvcs_integration
+configtemplate: ../definitions/templates/sample_fastl4.yml
+ips: ipam
+subnet: dataOne
+config:
+ Monitor_default: 0
+ LbMethod_default: round-robin

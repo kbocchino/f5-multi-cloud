@@ -1,0 +1,61 @@
+---
+# tasks file for f5-license-allocate
+    - name: lookup current key
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/regkey || true
+      register: regkeycurrent
+
+    - name: load regkey file
+      include_vars:
+         file: "../definitions/regkeys.yml"
+         name: regkeysvars
+      when: regkeycurrent['stdout'] == "" 
+
+    - debug: var=regkeysvars
+
+    - name: clear results
+      set_fact: 
+       regkeylookup: {'stdout':'findnew'}
+      when: regkeycurrent['stdout'] == ""
+
+    - name: find an unused regkey
+      shell: etcdctl get /inventory/f5/licenses/{{instancevars['type']}}/{{key}}/consumed/state/current || true
+      register: regkeylookup
+      ignore_errors: yes
+      when: (regkeycurrent['stdout'] == "" and regkeylookup is not defined) or 
+            (regkeycurrent['stdout'] == "" and regkeylookup.stdout != "") or
+            (regkeycurrent['stdout'] == "" and regkeylookup.stdout == "true")
+      with_items: "{{ regkeysvars[instancevars['type']]['keys']}}"
+      loop_control:
+       loop_var: key
+
+    - debug: var=regkeylookup
+      when: regkeycurrent['stdout'] == ""
+
+    - name: set regkey
+      set_fact: regkey={{ results['key'] }}
+      ignore_errors: yes
+      when: "'rc' in results and results.rc == 0 and regkeycurrent['stdout'] == ''"
+      with_items: "{{ regkeylookup.results }}"
+      loop_control:
+       loop_var: results
+
+    - debug: var=regkey
+      when: regkeycurrent['stdout'] == ""
+
+    - name: allocate regkey
+      command: etcdctl set /inventory/f5/licenses/{{instancevars['type']}}/{{regkey}}/consumed/state/current true
+      when: regkeycurrent['stdout'] == ""
+
+
+    - name: identify system consuming key
+      command: etcdctl set /inventory/f5/licenses/{{instancevars['type']}}/{{regkey}}/consumedby/name "{{instancevars['name']}}"
+      when: regkeycurrent['stdout'] == ""
+
+    - name: identify system consuming key
+      command: etcdctl set /inventory/f5/licenses/{{instancevars['type']}}/{{regkey}}/consumedby/instanceuuid "{{instanceuuid}}"
+      when: regkeycurrent['stdout'] == ""
+
+    - name: set instance id license
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/regkey "{{regkey}}"
+      when: regkeycurrent['stdout'] == ""
+...

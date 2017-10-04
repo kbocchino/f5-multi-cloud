@@ -1,0 +1,20 @@
+---
+
+# Provision Modules like GTM, AFM, ASM, PEM, etc.
+- name: Provision Modules
+  delegate_to: localhost
+
+  bigip_provision:
+      server: "{{ mgmtip['stdout'] }}"
+      user: "{{ instancevars['apiusername'] }}"
+      password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+      module: "{{ module }}"
+  ignore_errors: True
+
+- name: sleep for provsioning 
+  command: "sleep 60"
+
+- name: set provisioned state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/provisioned/state/current true
+...
+

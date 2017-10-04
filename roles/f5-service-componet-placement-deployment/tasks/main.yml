@@ -1,0 +1,153 @@
+---
+# tasks file for f5-service-componet-placement-deployment
+
+    - debug: var=placement
+
+    - debug: var=placement.keys()
+
+    - debug: var=placement.values()
+
+    - name: set placement provider if string
+      set_fact:
+       placementprovider: "{{placement}}"
+      when: placement is string
+
+    - name: set placement provider if not string
+      set_fact:
+       placementprovider: "{{placement.keys().0}}"
+      when: placement is iterable and placement is not string
+
+    - name: set placement deployment if not string
+      set_fact:
+       placementdeployment: "{{placement.values().0}}"
+      when: placement is iterable and placement is not string
+
+
+
+####deal with dynamic deployment placement
+
+    - name: get current instance placements
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/ | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/nuked/state/desired 2>&1;  echo;' | awk -F/ '$14 ~ "Error" || $14 == "false" { print $13}' || true
+      register: currentdeploymentinventory
+      when: placement is string
+
+    - debug: var=currentdeploymentinventory
+      when: placement is string
+
+    - name: get availible placement instances
+      shell: etcdctl ls /inventory/f5/deployments/devices | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/provider/name;  echo;' | awk -F/ '$7 == "{{placementprovider}}" { print $6}' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get /inventory/f5/deployments/devices/%/nuked/state/desired 2>&1;  echo;' | awk -F/ '$2 ~ "Error" || $2 == "false" { print $1}' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get /inventory/f5/deployments/devices/%/generation/acting 2>&1;  echo;' | awk -F/ '$2 >= 0 { print $1}' || true
+      register: availibledeploymentinventory
+      when: placement is string
+
+    - debug: var=availibledeploymentinventory
+      when: placement is string
+
+
+    - name: set current
+      set_fact:
+       placementdeployment: "{{ currentdeploymentinventory['stdout'] }}"
+      when: placement is string and currentdeploymentinventory['stdout'] != "" and currentdeploymentinventory['stdout'] in availibledeploymentinventory['stdout_lines']
+
+
+
+    - name: pick random if no current or if current is now not availible
+      set_fact:
+       placementdeployment: "{{ availibledeploymentinventory['stdout_lines'] | random }}"
+      when: (placement is string and currentdeploymentinventory['stdout'] == "") or (placement is string and currentdeploymentinventory['stdout'] not in availibledeploymentinventory['stdout_lines'])
+
+
+####
+
+
+    - debug: var=placementprovider
+    - debug: var=placementdeployment
+ 
+
+
+
+#### get current inventory of deployment
+
+    - name: get current depoyment inventoryuuids
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/{{placementdeployment}}/instances/ | awk -F/ '{ print $15}' || true
+      register: currentdeploymentinstanceuuidinventory
+
+    - debug: var=currentdeploymentinstanceuuidinventory
+
+
+
+####
+
+
+
+#### get inventory of acting generation 
+
+    - name: get desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/generation/acting || true
+      register: actinggeneration
+
+    - debug: var=actinggeneration
+
+
+    - name: get current generation list
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{placementdeployment}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/generation; echo;' | awk -F/ '$9 == "{{actinggeneration['stdout']}}" { print $8}' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/instances/%/nuked/state/desired 2>&1;  echo;' | awk -F/ '$2 ~ "Error" || $2 == "false" { print $1}'|| true
+      register: actinggenerationinventory
+
+    - debug: var=actinggenerationinventory
+
+####
+
+
+    - set_fact:
+       templatetype: "bigip"
+       iappdeploypassthrough_componet: "{{componet}}"
+
+    - set_fact:
+       templatetype: "bigip"
+      when: componet['template'] == "f5.analytics"
+
+
+    - name: loop through  instances and deploy service
+      include_role:
+        name: bigip_iapp_service
+      with_items: "{{ actinggenerationinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+
+#unset the deployment for nukedesired based on the fact that we were just asked to build it
+
+    - name: clear deployment from being nuked
+      shell: etcdctl rm -r /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/{{placementdeployment}}/nuked || true
+
+
+
+    - name: true up current with availible placement inventory set for nuke
+      command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/{{currentdeploymentinventory['stdout']}}/nuked/state/desired true
+      when: placement is string and currentdeploymentinventory['stdout'] not in availibledeploymentinventory['stdout_lines'] and currentdeploymentinventory['stdout'] != ""
+
+    - name: get current depoyment inventoryuuids
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/{{currentdeploymentinventory['stdout']}}/instances/ | awk -F/ '{ print $15}' || true
+      register: nukedesireddeploymentinstanceuuidinventory
+      when: placement is string and currentdeploymentinventory['stdout'] not in availibledeploymentinventory['stdout_lines'] and currentdeploymentinventory['stdout'] != ""
+
+
+    - debug: var=nukedesireddeploymentinstanceuuidinventory
+      when: placement is string and currentdeploymentinventory['stdout'] not in availibledeploymentinventory['stdout_lines']
+
+    - name: true up instanceuuid inventory set for nuke
+      command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/{{currentdeploymentinventory['stdout']}}/instances/{{instanceuuid}}/nuked/state/desired true
+      with_items: "{{nukedesireddeploymentinstanceuuidinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+      when: placement is string and currentdeploymentinventory['stdout'] not in availibledeploymentinventory['stdout_lines'] and currentdeploymentinventory['stdout'] != ""
+
+
+    - name: true up current with acting instanceuuid inventory set for nuke
+      command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{componet['name']}}/placements/{{placementprovider}}/{{componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/nuked/state/desired true
+      with_items: "{{currentdeploymentinstanceuuidinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+      when: instanceuuid not in actinggenerationinventory['stdout_lines']
+
+
+
+...

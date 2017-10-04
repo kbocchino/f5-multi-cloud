@@ -1,0 +1,60 @@
+---
+# tasks file for f5-service-componet-deployment-delete
+
+    - debug: var=componet
+
+#deal with service nuke
+
+    - name: mark for nuking if service is to be nuked
+      command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/nuked/state/desired true
+      when: servicenukedstatedesired['stdout'] == "true"
+
+
+    - name: get desired state
+      shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/nuked/state/desired || true
+      register: componetnukedstatedesired
+
+    - debug: var=componetnukedstatedesired
+
+
+    - name: get list of placements
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/ | awk -F/ '{ print $10}' || true
+      register: placementinventory
+
+    
+
+    - set_fact:
+       iappdeploypassthrough_componet: "{{componet}}"
+       scalingproviderprocessmode: nuke
+
+
+    - name: loop through componets and deploy disag
+      include_role:
+        name: f5-service-componet-deployment
+        tasks_from: scalingprovider
+
+
+
+    - name: loop through placements
+      include_role:
+        name: f5-service-componet-placement-deployment-delete
+      with_items: "{{ placementinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: placement
+
+
+
+# remove componet if no placements
+
+    - name: get list of placements
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/ | awk -F/ '{ print $10}' || true
+      register: placementinventory
+      when: componetnukedstatedesired['stdout'] == "true"
+
+    - debug: var=placementinventory
+
+    - name: clear all other history
+      command: etcdctl rm /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}} --recursive
+      when: componetnukedstatedesired['stdout'] == "true" and placementinventory['stdout'] == ""
+
+...

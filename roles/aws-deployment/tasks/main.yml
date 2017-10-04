@@ -1,0 +1,95 @@
+---
+# tasks file for aws
+
+
+    - name: set instance id desired state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/desired true
+
+    - name: set instance id generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/generation {{desiredgeneration['stdout']}}
+
+    - name: set instance id version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/version {{instancevars['version']}}
+
+    - name: get current state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current || true
+      register: deployedstatecurrent
+
+    - name: get regkey
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/regkey || true
+      register: regkey
+
+    - debug: var=regkey
+
+
+
+    - debug: msg="Starting {{providervars['type']}} Deployment for {{instanceuuid}}"
+      when: deployedstatecurrent['stdout'] != "true"
+
+    - name: launch ansible cloudformation example with role assumption
+      cloudformation:
+        aws_access_key: "{{ credsvars['aws-access-key'] }}"
+        aws_secret_key: "{{ credsvars['aws-secret-key'] }}" 
+        stack_name: "{{ instancevars['name'] }}-{{instanceuuid}}"
+        state: present
+        region: "{{ providervars['region'] }}"
+        disable_rollback: true
+        template_url: "{{ versionvars[instancevars['type']][providervars['type']][instancevars['version']]['template-url'] }}"
+      args:
+        template_parameters:
+          Vpc: "{{ instancevars['vpc'] }}"
+          subnet1Az1: "{{ instancevars['networkmapping-1']['name'] }}" 
+          bigipExternalSecurityGroup: "{{ instancevars['networkmapping-1']['securitygroup'] }}"
+          sshKey: "{{ instancevars['sshkey'] }}"
+          managementSubnetAz1: "{{ instancevars['networkmapping-mgmt']['name'] }}"
+          licenseKey1: "{{regkey['stdout']}}" 
+          bigipManagementSecurityGroup: "{{ instancevars['networkmapping-mgmt']['securitygroup'] }}"
+        tags:
+          Stack: "{{ instancevars['name'] }}-{{instanceuuid}}"
+      delegate_to: localhost   
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: cloud formation facts
+      cloudformation_facts:
+        aws_access_key: "{{ credsvars['aws-access-key'] }}"
+        aws_secret_key: "{{ credsvars['aws-secret-key'] }}" 
+        region: "{{ providervars['region'] }}"
+        stack_name: "{{ instancevars['name'] }}-{{instanceuuid}}"
+        all_facts: true
+      register: cloudformation_facts
+
+    - debug: msg="{{ cloudformation_facts }}"
+
+
+
+#add validation here then set current state
+
+    - name: set deployed state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current true
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set mgmtip
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/mgmtip 4.2.2.2
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/desired true
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/current true
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state creds
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/credentialed/state/current true
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set current generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current {{desiredgeneration['stdout']}}
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+    - name: set current version
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/version/current {{instancevars['version']}}
+      when: providervars['type'] == "aws" and deployedstatecurrent['stdout'] != "true"
+
+...

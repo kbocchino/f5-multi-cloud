@@ -1,0 +1,160 @@
+---
+
+
+#need to allocate IPs in etcd based on an input of
+ 
+- debug: var=subnet
+
+- set_fact:
+   allocatedip: ""
+   defaultroute: ""
+   placementprovider: "{{instancevars['provider']}}"
+
+
+
+- name: figure out type 
+  debug: var=instancevars['subnets'][subnet]['ips']
+
+
+
+### deal with a supplied list
+
+- set_fact:
+   currentusedvipipslist: []
+  when: instancevars['subnets'][subnet]['ips'] is iterable and instancevars['subnets'][subnet]['ips'] is not string and allocatedip == ""
+
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/IPAM/list/devices/{{instancevars['name']}}/{{subnet}} | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/consumed/state/current 2>&1;  echo;' | awk -F/ '$10 == "true" {print $9}' || true
+  register: currentusedvipips
+  when: instancevars['subnets'][subnet]['ips'] is iterable and instancevars['subnets'][subnet]['ips'] is not string and allocatedip == ""
+
+- set_fact:
+   currentusedvipipslist: "{{currentusedvipips['stdout_lines']}}"
+  when: "'stdout' in currentusedvipips and currentusedvipips['stdout'] != '' and allocatedip == ''"
+
+# pick next not used
+
+- name: pick next address
+  set_fact:
+   allocatedip: "{{instancevars['subnets'][subnet]['ips']|difference(currentusedvipipslist)|min}}"
+  when: instancevars['subnets'][subnet]['ips'] is iterable and instancevars['subnets'][subnet]['ips'] is not string and allocatedip == ""
+
+
+- name: consume ip from list
+  shell: etcdctl set /inventory/f5/IPAM/list/devices/{{instancevars['name']}}/{{subnet}}/{{allocatedip}}/consumed/state/current true
+  when: allocatedip != ""
+
+- set_fact:
+   ipammethod: "list"
+   subnetmask: "{{instancevars['subnets'][subnet]['subnetmask']}}"
+  when: instancevars['subnets'][subnet]['ips'] is iterable and instancevars['subnets'][subnet]['ips'] is not string and allocatedip != ""
+
+- set_fact:
+   defaultroute: "{{instancevars['subnets'][subnet]['defaultroute']}}"
+  when: instancevars['subnets'][subnet]['ips'] is iterable and instancevars['subnets'][subnet]['ips'] is not string and allocatedip != "" and instancevars['subnets'][subnet]['defaultroute']|default('') != "" and instancevars['subnets'][subnet]['defaultroute']|default('') != true and instancevars['subnets'][subnet]['defaultroute']|default('') != "true"
+
+
+
+- name: consume ip from list - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/list/devices/{{instancevars['name']}}/{{subnet}}/{{allocatedip}}/consumedby/instanceuuid {{instanceuuid}}
+  when: allocatedip != "" and ipammethod == "list"
+
+ 
+
+
+
+########
+
+
+
+
+### deal with IPAM
+
+
+
+
+
+- debug: var=subnet
+
+- debug: var=ipamvars['networks'][placementprovider]['subnets'][subnet]
+
+- debug: var=ipamvars['networks'][placementprovider]['subnets'][subnet]['gateway']
+
+
+- name: get list of used ips
+  shell: etcdctl ls /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/ | awk -F/ '{ print $9}' || true
+  register: consumedips
+  when: subnet is defined
+
+- debug: var=consumedips['stdout']|from_yaml
+
+
+- set_fact:
+   allocatedip: "{{'0.0.0.0/0'|ipaddr(seqint)|ipaddr('address')}}"
+  with_sequence: start="{{ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblock']['start']|ipaddr('int')}}" end="{{ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblock']['end']|ipaddr('int')}}"
+  loop_control:
+   loop_var: seqint
+  when: "instancevars['subnets'][subnet]['ips'] is string and allocatedip == '' and (instancevars['subnets'][subnet]['ips'] == 'IPAM' or instancevars['subnets'][subnet]['ips'] == 'ipam') and (consumedips['stdout']|from_yaml is not iterable or '0.0.0.0/0'|ipaddr(seqint)|ipaddr('address') not in consumedips['stdout']|from_yaml) and ('reservedips' not in ipamvars['networks'][placementprovider]['subnets'][subnet] or '0.0.0.0/0'|ipaddr(seqint)|ipaddr('address') not in ipamvars['networks'][placementprovider]['subnets'][subnet]['reservedips']) and allocatedip == ''"
+
+- set_fact:
+   ipammethod: "ipam"
+   subnetmask: "{{ipamvars['networks'][placementprovider]['subnets'][subnet]['subnetmask']}}"
+  when: "instancevars['subnets'][subnet]['ips'] is string and allocatedip != '' and (instancevars['subnets'][subnet]['ips'] == 'IPAM' or instancevars['subnets'][subnet]['ips'] == 'ipam')"
+
+- set_fact:
+   defaultroute: "{{ipamvars['networks'][placementprovider]['subnets'][subnet]['gateway']}}"
+  when: "instancevars['subnets'][subnet]['ips'] is string and allocatedip != '' and (instancevars['subnets'][subnet]['ips'] == 'IPAM' or instancevars['subnets'][subnet]['ips'] == 'ipam') and (instancevars['subnets'][subnet]['defaultroute']|default('') == true or instancevars['subnets'][subnet]['defaultroute']|default('') == 'true')"
+ 
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/{{allocatedip}}/consumed/state/current true
+  when: allocatedip != "" and ipammethod == "ipam"
+  
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/{{allocatedip}}/consumedby/instanceuuid {{instanceuuid}}
+  when: allocatedip != "" and ipammethod == "ipam" 
+
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/{{allocatedip}}/consumedby/name {{instancevars['name']}}
+  when: allocatedip != "" and ipammethod == "ipam" 
+
+
+- debug: var=allocatedip
+
+
+
+
+########
+
+
+
+
+### allocate address
+ 
+
+
+- name: set vipip method for instance
+  shell: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/subnets/{{subnet}}/method {{ipammethod}}
+  when: allocatedip != ""
+
+- name: set route for instance
+  shell: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/defaultroute {{defaultroute}}
+  when: allocatedip != "" and defaultroute != ""
+
+- name: set subnetmask for instance
+  shell: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/subnets/{{subnet}}/subnetmask {{subnetmask}}
+  when: allocatedip != ""
+
+- name: set vipip for instance
+  shell: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/subnets/{{subnet}}/ip {{allocatedip}}
+  when: allocatedip != ""
+
+########
+
+
+
+
+
+
+
+...

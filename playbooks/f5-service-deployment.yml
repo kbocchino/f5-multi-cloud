@@ -1,0 +1,68 @@
+---
+- hosts: localhost 
+  connection: local
+  pre_tasks:
+
+    - debug: var=fileinput
+   
+    - set_fact:
+       force_update: no
+
+    - set_fact:
+       force_update: yes
+      when: force is defined and (force == "true" or force == "yes" or force == true or force == yes)
+
+
+
+    - name: load environment
+      include_vars:
+         file: "../definitions/environment.yml"
+         name: environmentvars
+
+    - name: load ipam
+      include_vars:
+         file: "../definitions/ipam.yml"
+         name: ipamvars
+
+    - debug: var=ipamvars
+    
+    - name: load service details
+      include_vars:
+         file: "{{ fileinput }}"
+         name: servicevars
+
+    - debug: var=servicevars
+
+    - name: clear service from being nuked
+      shell: etcdctl rm -r /inventory/f5/deployments/services/{{servicevars['name']}}/nuked || true
+
+    - name: loop through componets and deploy l7 services
+      include_role:
+        name: f5-service-componet-deployment
+      with_items: "{{ servicevars['componets']}}"
+      loop_control:
+       loop_var: componet
+
+
+# get a list of componets to drive disag
+
+    - set_fact:
+       scalingproviderprocessmode: pave
+       servicename: "{{servicevars['name']}}"
+
+    - name: get list of componets
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets | awk -F/ '{ print $8}' || true
+      register: componetinventory
+
+    - debug: var=componetinventory
+
+
+    - name: loop through componets and deploy disag
+      include_role:
+        name: f5-service-componet-deployment
+        tasks_from: scalingprovider
+      with_items: "{{ componetinventory['stdout_lines'] }}"
+      loop_control:
+       loop_var: componet
+
+...

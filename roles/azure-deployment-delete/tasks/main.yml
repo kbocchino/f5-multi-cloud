@@ -1,0 +1,20 @@
+---
+# tasks file for azure
+#
+    - name: remove azure image
+      environment:
+       AZURE_CLIENT_ID: "{{ credsvars['client-id'] }}"
+       AZURE_SECRET: "{{ credsvars['client-secret'] }}"
+       AZURE_SUBSCRIPTION_ID: "{{ providervars['subscription-id'] }}"
+       AZURE_TENANT: "{{ providervars['tenant-id'] }}"
+      azure_rm_deployment:
+         state: absent
+         resource_group_name: "{{instancename}}-{{instanceuuid}}"
+
+
+#add validation here then set current state
+
+    - name: clear all other history
+      command: etcdctl rm /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}} --recursive
+
+...

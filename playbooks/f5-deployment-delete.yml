@@ -1,0 +1,291 @@
+---
+- hosts: localhost 
+  connection: local
+  pre_tasks:
+    - debug: var=instancename
+
+    - name: load environment
+      include_vars:
+         file: "../definitions/environment.yml"
+         name: environmentvars
+    
+    - name: get provider
+      shell: etcdctl get /inventory/f5/deployments/devices/{{ instancename }}/provider/name || true
+      register: provider
+
+    - name: get instancecreds
+      shell: etcdctl get /inventory/f5/deployments/devices/{{ instancename }}/creds/path || true
+      register: instancecreds
+
+    - name: get instancemode
+      shell: etcdctl get /inventory/f5/deployments/devices/{{ instancename }}/mode || true
+      register: instancemode
+
+    - name: load provider file
+      include_vars:
+         file: "../definitions/providers/{{ provider['stdout'] }}.yml"
+         name: providervars
+
+    - debug: var=providervars
+
+
+    - name: load creds file
+      include_vars:
+         file: "../definitions/creds/{{ providervars['creds'] }}"
+         name: credsvars
+      when: instancemode['stdout'] == "managed"
+
+    - debug: var=credsvars
+      when: instancemode['stdout'] == "managed"
+
+    - name: load instance creds file
+      include_vars:
+         file: "../definitions/creds/{{ instancecreds['stdout'] }}"
+         name: instancecredsvars
+
+    - debug: var=instancecredsvars
+
+
+    - name: get desired state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/nuked/state/desired || true
+      register: nukedstatedesired
+
+    - debug: var=nukedstatedesired
+
+    - name: get nuke safe
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/nuke/safe || true
+      register: nukesafe
+
+    - debug: var=nukesafe
+
+##check to see if there is still a deployment file for this instance name
+
+    - name: find instance file for instancename
+      find:
+        paths: "../definitions/instances/"
+        patterns: "*.yml,*.yaml" 
+        contains: '^name:\s*{{instancename}}\b'
+      register: instancedeploymentfiles      
+
+    - debug: var=instancedeploymentfiles
+
+    - name: mark for nuking if we dont have a file
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancename}}/nuked/state/desired true
+      when: instancedeploymentfiles['matched'] != 1 and nukedstatedesired['stdout'] != "true"
+
+    - name: get desired state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/nuked/state/desired || true
+      register: nukedstatedesired
+
+    - debug: var=nukedstatedesired
+
+
+##loop through and set nuked desired state for instances - this occurs when the file gets deleted
+    - name: get list of instances that should have nuked desired state to true
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancename}}/instances/ | awk -F/ '{ print $8}' || true
+      register: desireddesirednukeinventory
+      when: nukedstatedesired['stdout'] == "true"
+
+    - debug: var=desireddesirednukeinventory
+
+
+    - name: set list of instances that should have nuked desired state to true
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}}/nuked/state/desired true
+      when: nukedstatedesired['stdout'] == "true"
+      with_items: "{{desireddesirednukeinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+
+
+
+##scale down logic
+#need to get desired instance count check that against the current non nuke desired state count of instances and pick the instances that should be set for nuking 
+    - name: get desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/generation/desired || true
+      register: desiredgeneration
+
+    - debug: var=desiredgeneration
+
+    - name: get desired instancecount
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/instancecount/desired || true
+      register: desiredinstancecount
+
+    - debug: var=desiredinstancecount
+
+    - name: get current generation list
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancename}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/generation; echo;' | awk -F/ '$9 == "{{desiredgeneration['stdout']}}" { print $8}' || true
+      register: currentdesiredgenerationinventory
+
+    - debug: var=currentdesiredgenerationinventory
+
+    - name: get inventory of nonnuked set for the desired generation
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}}/nuked/state/desired || true
+      register: currentdesiredgenerationinventorydesirednukedstate
+      with_items: "{{currentdesiredgenerationinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+
+    - debug: var=currentdesiredgenerationinventorydesirednukedstate
+
+## we should add some more logic to go after the least ready devices first vs random 
+
+
+    - name: clear currentdesiredgenerationinventory_nonnuke
+      set_fact:
+       currentdesiredgenerationinventory_nonnuke: []
+
+    - name: set currentdesiredgenerationinventory_nonnuke
+      set_fact:
+       currentdesiredgenerationinventory_nonnuke: "{{ currentdesiredgenerationinventory_nonnuke }} + [ '{{ results['instanceuuid'] }}' ]"
+      when: "'rc' in results and results.stdout == ''"
+      with_items: "{{ currentdesiredgenerationinventorydesirednukedstate.results }}"
+      loop_control:
+       loop_var: results
+
+    - debug: var=currentdesiredgenerationinventory_nonnuke
+
+    - name: set current count
+      set_fact:
+       currentinstancecount_nonnuke: "{{currentdesiredgenerationinventory_nonnuke | length}}"
+
+    - debug: var=currentinstancecount_nonnuke
+
+
+    - name: mark extra instances nuke desired state true
+      with_sequence: count={{ currentinstancecount_nonnuke | int - desiredinstancecount['stdout'] | int }}
+      loop_control:
+       loop_var: id
+
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancename}}/instances/{{currentdesiredgenerationinventory_nonnuke[id | int - 1 ]}}/nuked/state/desired true
+      ignore_errors: yes
+      when: desiredinstancecount['stdout'] < currentinstancecount_nonnuke and instancemode['stdout'] == "managed"
+
+
+
+
+
+
+
+##get instance inventory that are set to be nuked
+    - name: get list of instances that are set to be nuked
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancename}}/instances/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/nuked/state/desired; echo;' | awk -F/ '$9 == "true" { print $8}' || true
+      register: desirednukeinventory
+
+    - debug: var=desirednukeinventory
+
+
+
+##loop through instances and check for application deployments
+#set nuke safe for instances with no applications
+
+    - name: check for nuke safety
+      shell: etcdctl ls -r /inventory/f5/deployments/services | grep {{instancename}}/instances/{{instanceuuid}} || true
+      register: nukesafetyresults
+      with_items: "{{desirednukeinventory['stdout_lines']}}"
+      loop_control:
+       loop_var: instanceuuid
+      when: instanceuuid != "" and desirednukeinventory['stdout_lines'] != ""
+
+
+    - debug: var=nukesafetyresults
+      when: desirednukeinventory != ""
+ 
+    - name: clear safedesirednukeinventory
+      set_fact:
+       safedesirednukeinventory: []
+      when: desirednukeinventory != ""
+
+    - name: set safedesirednukeinventory
+      set_fact:
+       safedesirednukeinventory: "{{ safedesirednukeinventory }} + [ '{{ results['instanceuuid'] }}' ]"
+      when: "'rc' in results and results.stderr == '' and results.stdout == '' and desirednukeinventory['stdout_lines'] != ''"
+      with_items: "{{ nukesafetyresults.results }}"
+      loop_control:
+       loop_var: results
+
+    - debug: var=safedesirednukeinventory
+
+    - name: set safe flag on instances
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}}/nuke/safe true
+      with_items: "{{ safedesirednukeinventory }}"
+      when: safedesirednukeinventory != "" and desirednukeinventory['stdout_lines'] != ""
+      loop_control:
+       loop_var: instanceuuid
+
+
+#remove from big-iq if needed
+
+
+    - name: get current bigiq device
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancename}}/bigiq/name || true
+      register: bigiqdevice
+
+
+    - name: configure bigiq to remove this device
+      include_role:
+        name: bigiq_manage_device
+        tasks_from: remove
+      when: bigiqmanagedstatecurrent['stdout'] == "true" and  bigiqdevice['stdout'] != ""
+      with_items: "{{ safedesirednukeinventory }}"
+      when: safedesirednukeinventory != "" and desirednukeinventory['stdout_lines'] != ""
+      loop_control:
+       loop_var: instanceuuid
+
+
+
+
+
+
+#delete compute
+
+
+
+    - name: delete vsphere
+      with_items: "{{ safedesirednukeinventory }}"
+      include_role:
+        name: vsphere-deployment-delete
+      vars:
+        instanceuuid: "{{ item }}"
+      when: instancemode['stdout'] == "managed" and providervars['type'] == "vsphere" and safedesirednukeinventory != "" and desirednukeinventory['stdout_lines'] != ""
+
+#    - name: delete aws
+#      with_items: "{{ safedesirednukeinventory }}"
+#      include_role:
+#        name: aws-deployment-delete
+#      vars:
+#        instanceuuid: "{{ item }}"
+#      when: instancemode['stdout'] == "managed" and providervars['type'] == "aws" and safedesirednukeinventory != "" and desirednukeinventory['stdout_lines'] != ""
+
+    - name: delete azure
+      with_items: "{{ safedesirednukeinventory }}"
+      include_role:
+        name: azure-deployment-delete
+      vars:
+        instanceuuid: "{{ item }}"
+      when: instancemode['stdout'] == "managed" and providervars['type'] == "azure" and safedesirednukeinventory != "" and desirednukeinventory['stdout_lines'] != ""
+
+    - name: delete unmanaged
+      command: etcdctl rm /inventory/f5/deployments/devices/{{instancename}}/instances/{{instanceuuid}} --recursive
+      with_items: "{{ safedesirednukeinventory }}"
+      vars:
+        instanceuuid: "{{ item }}"
+      when: instancemode['stdout'] == "unmanaged" and safedesirednukeinventory != "" and desirednukeinventory['stdout_lines'] != ""
+
+
+#remove instancename if no instances
+
+    - name: get list of instances
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{instancename}}/instances/ | awk -F/ '{ print $8}' || true
+      register: inventory
+      when: nukedstatedesired['stdout'] == "true"
+
+    - debug: var=inventory
+
+
+
+    - name: clear all other history
+      command: etcdctl rm /inventory/f5/deployments/devices/{{instancename}} --recursive
+      when: nukedstatedesired['stdout'] == "true" and inventory['stdout'] == ""
+
+
+...

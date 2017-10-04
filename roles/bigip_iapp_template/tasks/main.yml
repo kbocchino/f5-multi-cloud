@@ -1,0 +1,61 @@
+
+---
+
+- debug: var=templateloop
+
+- name: get mgmtip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/mgmtip || true
+  register: mgmtip
+
+- debug: var=mgmtip
+
+- name: get current state
+  shell: etcdctl get /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/versions/{{templateloop[1]['name']}}/deployed/current || true
+  register: currentdeployed
+
+- debug: var=currentdeployed
+
+- name: get current version
+  shell: etcdctl get /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/versions/{{templateloop[1]['name']}}/version/current || true
+  register: currentversion
+
+- debug: var=currentversion['stdout']
+- debug: var=templateloop[1]['version']
+- debug: var=currentdeployed['stdout']
+- debug: var=templateloop[1]['active']
+
+
+- name: install iapp templates
+  delegate_to: localhost
+  bigip_iapp_template:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    state: "present"
+    force: yes
+    content: "{{ lookup('file', templateloop[1]['path']) }}"
+  when: currentdeployed['stdout'] != "true" or currentversion['stdout'] != templateloop[1]['version']
+
+
+- name: set iapp template load state
+  command: etcdctl set /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/versions/{{templateloop[1]['name']}}/deployed/current true
+  when: currentdeployed['stdout'] != "true" or currentversion['stdout'] != templateloop[1]['version']
+
+- name: set iapp template load version
+  command: etcdctl set /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/versions/{{templateloop[1]['name']}}/version/current {{templateloop[1]['version']}}
+  when: currentdeployed['stdout'] != "true" or currentversion['stdout'] != templateloop[1]['version']
+
+- name: set iapp template load path
+  command: etcdctl set /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/versions/{{templateloop[1]['name']}}/path/current {{templateloop[1]['path']}}
+  when: currentdeployed['stdout'] != "true" or currentversion['stdout'] != templateloop[1]['version']
+
+
+- name: set iapp template active
+  command: etcdctl set /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/active/name/current {{templateloop[1]['name']}}
+  when: templateloop[1]['active']|default('') == "true" or templateloop[1]['active']|default('') == true or templateloop[1]['active']|default('') == "yes"
+
+- name: set iapp template active
+  command: etcdctl set /inventory/f5/deployments/devices/{{device}}/instances/{{templateloop[0]}}/templates/iapps/{{templateloop[1]['template']}}/active/version/current {{templateloop[1]['version']}}
+  when: templateloop[1]['active']|default('') == "true" or templateloop[1]['active']|default('') == true or templateloop[1]['active']|default('') == "yes"
+
+...

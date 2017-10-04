@@ -1,0 +1,6 @@
+name: azure1
+type: azure
+region: "West US"
+creds: azure.yml
+subscription-id: <ID>
+tenant-id:  <ID> 

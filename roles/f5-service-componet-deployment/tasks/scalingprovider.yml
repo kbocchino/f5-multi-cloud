@@ -1,0 +1,32 @@
+---
+# tasks file for f5-service-componet-deployment
+
+    - debug: var=componet
+    - debug: var=scalingproviderprocessmode
+
+
+    - set_fact:
+       placementpassthrough_componet: "{{componet}}"
+
+    - shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/ | grep -v '/$' | xargs -n 1 -I% sh -c 'etcdctl ls %/; ' | xargs -n 1 -I% sh -c 'etcdctl ls %/deployments; ' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/scalingprovider/name/current 2>&1;' | awk -F/ '$14 !~ "Error" { print $14}'  
+      register: scalingproviderinventory
+
+
+    - debug: var=scalingproviderinventory
+
+
+
+
+
+    - name: loop through providers
+      include_role:
+        name: f5-service-componet-placement-deployment
+        tasks_from: scalingprovider
+      with_items: "{{ scalingproviderinventory['stdout_lines']|unique}}"
+      loop_control:
+       loop_var: scalingprovider
+
+
+
+
+...

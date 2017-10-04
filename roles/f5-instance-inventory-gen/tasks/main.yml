@@ -1,0 +1,12 @@
+---
+# tasks file for f5-instance-inventory-gen
+    - name: create uuid
+      shell: "uuidgen | awk '{print substr($1,0,8)}'"
+      register: instanceuuid
+
+    - debug: var=instanceuuid
+
+    - name: append to list
+      set_fact:
+       desireddesiredgenerationinventory: "{{ desireddesiredgenerationinventory }} + [ '{{ instanceuuid['stdout'] }}' ]"
+...

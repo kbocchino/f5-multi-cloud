@@ -1,0 +1,58 @@
+name: securesite10
+componets:
+ - name: www.securesite10.com
+   placement:
+    - vsphere-sjc: van
+   template: appsvcs_integration
+   configtemplate: ../definitions/templates/sample_https.yml
+   configsubs:
+    vipips:
+     IP1:
+       ports:
+        tcp:
+         - 80
+         - 443
+       ips: IPAM
+   config:
+    vs__Name: "%COMPONET%"
+    vs__ProfileServerSSL: /Common/serverssl
+    vs__ProfileClientSSL: "create:cert-key-chain=set_raw:add{default{cert /Common/test.crt key /Common/test.key}};defaults-from=/Common/clientssl"
+    vs__ProfileClientSSLCert: /Common/test.crt
+    vs__ProfileClientSSLKey: /Common/test.key
+    vs__ProfileClientSSLChain: /Common/ca-bundle.crt
+    vs__ProfileClientSSLCipherString: DEFAULT
+    vs__ProfileClientSSLAdvOptions: handshake-timeout=60;strict-resume=enabled
+    vs__AdvProfiles: /Common/websecurity
+    l7policy__defaultASM: /Common/test
+    pool__addr: "%IP1%"
+    pool__Members:
+     - Index: 0
+       IPAddress: "151.101.129.67"
+       Port: 443
+       ConnectionLimit: 0
+       Ratio: 1
+       PriorityGroup: 0
+       State: enabled
+       AdvOptions: none
+     - Index: 0
+       IPAddress: "151.101.41.67"
+       Port: 443
+       ConnectionLimit: 0
+       Ratio: 1
+       PriorityGroup: 0
+       State: enabled
+       AdvOptions: none
+#    l7policy__rulesMatch:
+#     - Group: default
+#       Operand: http-uri/request/path
+#       Negate: no
+#       Condition: starts-with
+#       Value: /
+#       CaseSensitive: no
+#       Missing: no
+#       zznullvaluefix: placeholder
+#    l7policy__rulesAction:
+#     - Group: default
+#       Target: "forward/request/select/pool"
+#       Parameter: pool:0
+

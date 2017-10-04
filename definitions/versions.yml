@@ -1,0 +1,20 @@
+bigiq:
+ vsphere:
+  5.3.0:
+   location: /var/f5/images/BIG-IQ-5.3.0.0.0.1119-scsi.ova
+bigip:
+ vsphere:
+  13.0.0:
+   location: /var/f5/images/BIGIP-13.0.0.0.0.1645.ALL-scsi.ova
+  12.1.2:
+   location: /var/f5/images/BIGIP-12.1.2.0.0.249.ALL-scsi.ova
+  12.1.1:
+   location: /var/f5/images/BIGIP-12.1.1.2.0.204.ALL-scsi.ova
+ aws:
+  13.0.0:
+   template-url: https://s3.amazonaws.com/f5-cft/f5-existing-stack-byol-2nic-bigip.template
+ azure:
+  13.0.0:
+   version: 13.0.0
+   build: 13.0.021
+   template: azuredeploy-3.3.1.1.json

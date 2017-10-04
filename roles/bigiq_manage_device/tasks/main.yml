@@ -1,0 +1,263 @@
+---
+#pick an instance we want to talk with
+
+
+    - name: get list of bigiqmgmtips
+      shell: etcdctl ls /inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/instances | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;' | awk -F/ '$9 ~ "Error" || $9 == "false" { print $8}' | xargs -n 1 -I% sh -c 'etcdctl get inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/instances/%/mgmtip'
+      register: bigiqmgmtips
+
+    - debug: var=bigiqmgmtips
+
+#add logic to figure out which one is up and active
+
+    - set_fact:
+       bigiqmgmtip: "{{bigiqmgmtips['stdout_lines']|first}}"
+ 
+    - name: get bigiqapiusername
+      shell: etcdctl get /inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/creds/apiusername || true
+      register: bigiqapiusername
+      
+    - debug: var=bigiqapiusername
+      
+    - name: get bigiqinstancecredsfile
+      shell: etcdctl get /inventory/f5/deployments/devices/{{bigiqdevice['stdout'] }}/creds/path || true
+      register: bigiqinstancecredsfile
+      
+    - debug: var=bigiqinstancecredsfile
+      
+      
+    - name: load instance creds file
+      include_vars:
+       file: "../definitions/creds/{{ bigiqinstancecredsfile['stdout'] }}"
+       name: bigiqinstancecredsvars
+     
+    - debug: var=bigiqinstancecredsvars
+ 
+ 
+ 
+    - name: get bigiq-auth
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/shared/authn/login"
+       method: POST
+       body: "{username: {{bigiqapiusername['stdout']}}, password:{{bigiqinstancecredsvars[bigiqapiusername['stdout']]['password']}}}"
+       body_format: json
+       return_content: yes
+       validate_certs: no
+      register: bigiqauthtokenrequest
+ 
+    - debug: var=bigiqauthtokenrequest['json']['token']['token']
+  
+    - set_fact:
+       bigiqauthtoken: "{{bigiqauthtokenrequest['json']['token']['token']}}"
+
+
+    - name: start task add device
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/global/tasks/device-trust"
+       method: POST
+       body: "{'address':'{{mgmtip['stdout']}}', 'userName':'{{instancevars['apiusername']}}', 'password':'{{instancecredsvars[instancevars['apiusername']]['password']}}'}"
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdevicetrust
+      ignore_errors: yes
+
+    - debug: var=bigiqdevicetrust
+
+
+    
+    - name: get status
+      uri:
+       url: "{{bigiqdevicetrust.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdevicetrustlookup
+      until: "bigiqdevicetrustlookup.json.currentStep == 'DONE' or ('errorMessage' in bigiqdevicetrustlookup.json and  'BIG-IQ has already discovered a device' in bigiqdevicetrustlookup.json.errorMessage)"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+  
+
+    - debug: var=bigiqdevicetrustlookup.json.currentStep
+
+
+
+    - name: get machineid
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/system/machineid-resolver?$filter=('address'+eq+'{{mgmtip['stdout']}}')"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqmachineidlookup
+
+
+
+
+    - set_fact:
+       machineid: "{{bigiqmachineidlookup['json']['items'][0]['machineId']}}"
+
+    - debug: var=machineid
+
+#dont need to discover if we are doing import, this will be done for us
+#    - name: start task discover
+#      uri:
+#       url: "https://{{bigiqmgmtip}}/mgmt/cm/global/tasks/device-discovery"
+#       method: POST
+#       body: 
+#        deviceReference: 
+#         link: https://localhost/mgmt/cm/system/machineid-resolver/{{machineid}}
+#        moduleList: 
+#         - module: security_shared
+#         - module: asm
+#       body_format: json
+#       headers:
+#        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+#       return_content: yes
+#       validate_certs: no
+#      register: bigiqdevicediscover
+#      ignore_errors: yes
+#
+#    - debug: var=bigiqdevicediscover
+#
+#
+#    - name: get status
+#      uri:
+#       url: "{{bigiqdevicediscover.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+#       method: GET
+#       headers:
+#        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+#       return_content: yes
+#       validate_certs: no
+#      register: bigiqdevicediscoverlookup
+#      until: "bigiqdevicediscoverlookup.json.currentStep == 'DONE' or ('errorMessage' in bigiqdevicediscoverlookup.json and 'BIG-IQ has already discovered a device' in bigiqdevicediscoverlookup.json.errorMessage)"
+#      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+#      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+
+
+    - name: start task ltm import
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/tasks/declare-mgmt-authority"
+       method: POST
+       body:
+        deviceReference:
+         link: https://localhost/mgmt/cm/system/machineid-resolver/{{machineid}}
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceltmimport
+      ignore_errors: yes
+
+    - debug: var=bigiqdeviceltmimport
+
+
+    - name: get status
+      uri:
+       url: "{{bigiqdeviceltmimport.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceltmimportlookup
+      until: bigiqdeviceltmimportlookup.json.currentStep == "DONE" or bigiqdeviceltmimportlookup.json.currentStep == "PENDING_CONFLICTS" or bigiqdeviceltmimportlookup.json.currentStep ==  "PENDING_CHILD_CONFLICTS"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+
+    - name: resolve conflicts
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/tasks/declare-mgmt-authority/{{bigiqdeviceltmimport.json.id}}"
+       method: PATCH
+       body:
+        conflicts: "{{bigiqdeviceltmimportlookup.json.conflicts|regex_replace('NONE', 'USE_BIGIQ')}}"
+        status: STARTED
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      ignore_errors: yes
+      when: bigiqdeviceltmimportlookup.json.currentStep == "PENDING_CONFLICTS" or bigiqdeviceltmimportlookup.json.currentStep ==  "PENDING_CHILD_CONFLICTS"
+
+
+    - name: get status
+      uri:
+       url: "{{bigiqdeviceltmimport.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceltmimportlookup
+      until: bigiqdeviceltmimportlookup.json.currentStep == "DONE"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+
+
+    - name: start task asm import
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/asm/tasks/declare-mgmt-authority"
+       method: POST
+       body:
+        deviceReference:
+         link: https://localhost/mgmt/cm/system/machineid-resolver/{{machineid}}
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceasmimport
+      ignore_errors: yes
+
+    - debug: var=bigiqdeviceasmimport
+
+
+    - name: get status
+      uri:
+       url: "{{bigiqdeviceasmimport.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceasmimportlookup
+      until: bigiqdeviceasmimportlookup.json.currentStep == "DONE" or bigiqdeviceasmimportlookup.json.currentStep == "PENDING_CONFLICTS" or bigiqdeviceasmimportlookup.json.currentStep ==  "PENDING_CHILD_CONFLICTS"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+
+    - name: resolve conflicts
+      uri:
+       url: "https://{{bigiqmgmtip}}/mgmt/cm/adc-core/tasks/declare-mgmt-authority/{{bigiqdeviceasmimport.json.id}}"
+       method: PATCH
+       body:
+        conflicts: "{{bigiqdeviceamsimportlookup.json.conflicts|regex_replace('NONE', 'USE_BIGIQ')}}"
+        status: STARTED
+       body_format: json
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      ignore_errors: yes
+      when: bigiqdeviceasmimportlookup.json.currentStep == "PENDING_CONFLICTS" or bigiqdeviceasmimportlookup.json.currentStep ==  "PENDING_CHILD_CONFLICTS"
+
+
+    - name: get status
+      uri:
+       url: "{{bigiqdeviceasmimport.json.selfLink|regex_replace('localhost', bigiqmgmtip)}}"
+       method: GET
+       headers:
+        X-F5-Auth-Token: "{{bigiqauthtoken}}"
+       return_content: yes
+       validate_certs: no
+      register: bigiqdeviceasmimportlookup
+      until: bigiqdeviceasmimportlookup.json.currentStep == "DONE"
+      retries: "{{environmentvars['bigiq']['retry']['count']}}"
+      delay: "{{environmentvars['bigiq']['retry']['delay']}}"
+...

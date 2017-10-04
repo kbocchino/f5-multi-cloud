@@ -1,0 +1,25 @@
+---
+
+- name: Update root password for default systems
+  bigip_user:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "admin"
+    password: "admin"
+    state: "present"
+    username_credential: "root"
+    password_credential: "{{instancecredsvars['root']['password']}}"
+
+ 
+- name: Update admin password for default systems
+  bigip_user:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "admin"
+    password: "admin"
+    state: "present"
+    username_credential: "admin"
+    password_credential: "{{instancecredsvars['admin']['password']}}"
+
+- name: set credentialed state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/credentialed/state/current true
+
+...

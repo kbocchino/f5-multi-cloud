@@ -1,0 +1,30 @@
+---
+# tasks file for unmanaged
+#
+    - name: set instance id generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/generation 0
+
+    - name: get current state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current || true
+      register: deployedstatecurrent
+
+
+
+
+    - name: set deployed state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/deployed/state/current true
+      when: deployedstatecurrent['stdout'] != "true"
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/current true
+      when: deployedstatecurrent['stdout'] != "true"
+
+    - name: set current generation
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/generation/current 0
+      when: deployedstatecurrent['stdout'] != "true"
+
+    - name: set mgmtip
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/mgmtip {{instanceuuid}}
+      when: deployedstatecurrent['stdout'] != "true"
+
+...

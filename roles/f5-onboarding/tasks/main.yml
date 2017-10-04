@@ -1,0 +1,230 @@
+---
+# tasks file for f5-onboarding
+#
+    - name: get desired state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/desired || true
+      register: onboardedstatedesired
+
+    - name: get current state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/current || true
+      register: onboardedstatecurrent
+
+    - name: get current pw state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/credentialed/state/current || true
+      register: credentialedstatecurrent
+
+    - name: get current licensed state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/licensed/state/current || true
+      register: licensedstatecurrent
+
+    - name: get current bigiq state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/bigiq/managed/state/current || true
+      register: bigiqmanagedstatecurrent
+
+    - name: get current bigiq device
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/bigiq/name || true
+      register: bigiqdevice
+
+    - name: get current provisioned state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/provisioned/state/current || true
+      register: provisionedstatecurrent
+
+    - name: get current base state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/base/state/current || true
+      register: basestatecurrent
+
+    - name: get current vlan state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/vlan/state/current || true
+      register: vlanstatecurrent
+
+    - name: get current selfip state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/selfip/state/current || true
+      register: selfipstatecurrent
+
+    - name: get current route state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/route/state/current || true
+      register: routestatecurrent
+
+    - name: get regkey
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/regkey || true
+      register: regkey
+
+    - debug: var=regkey
+
+    - name: get mgmtip
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/mgmtip || true
+      register: mgmtip
+
+    - debug: msg="onboarding {{providervars['type']}} {{instancevars['name']}} for {{instanceuuid}}"
+      when: onboardedstatecurrent['stdout'] != "true"
+
+    - name: check for bigip_ready
+      include_role:
+        name: bigip_ready
+      when: onboardedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+    - name: sleep for a bit longer just incase
+      command: "sleep 15"
+      when: onboardedstatecurrent['stdout'] != "true"
+
+
+    - name:
+      include_role:
+        name: bigip_auth
+      when: onboardedstatecurrent['stdout'] != "true" and credentialedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+    - name: get current pw state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/credentialed/state/current || true
+      register: credentialedstatecurrent
+
+    - name:  
+      include_role:
+        name: bigip_system
+      when: onboardedstatecurrent['stdout'] != "true" and basestatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+    - name: get current base state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/base/state/current || true
+      register: basestatecurrent
+
+    - name:  
+      include_role:
+        name: bigip_save
+      when: onboardedstatecurrent['stdout'] != "true" and  instancevars['type'] == "bigip"
+
+    - name:
+      include_role:
+        name: bigip_license
+      when: onboardedstatecurrent['stdout'] != "true" and licensedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+    - name: get current licensed state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/licensed/state/current || true
+      register: licensedstatecurrent
+
+    - name: check for bigip_ready
+      include_role:
+        name: bigip_ready
+      when: onboardedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+    - name: get current provisioned state
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/provisioned/state/current || true
+      register: provisionedstatecurrent
+
+    - name:
+      include_role:
+        name: bigip_provision
+      with_items: "{{ instancevars['modules'] }}"  
+      loop_control:
+       loop_var: module
+      when: onboardedstatecurrent['stdout'] != "true" and provisionedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+
+# patch issue with missing sync-failover group
+
+
+
+    - name: configure sync failover device group with device
+      delegate_to: localhost
+      bigip_command:
+        server: "{{ mgmtip['stdout'] }}"
+        user: "{{ instancevars['apiusername'] }}"
+        password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+        commands: "create cm device-group sync-failover devices replace-all-with { {{ instancevars['name'] }}-{{instanceuuid}}.{{ instancevars['domain'] }} } type sync-failover "
+      when: onboardedstatecurrent['stdout'] != "true" and  instancevars['type'] == "bigip" 
+
+
+
+
+# networking
+
+
+
+
+
+#get current IPs
+
+
+#figure out needed IPs
+
+#allocate IPs
+
+#configure vlans
+
+
+    - name: set networks
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/defaultvipsubnet/name {{ subnet }}
+      when: onboardedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip" and subnet != "mgmt" and (instancevars['subnets'][subnet]['defaultvips']|default('') == "true" or instancevars['subnets'][subnet]['defaultvips']|default('') == true)
+      with_items: "{{ instancevars['subnets'] }}"
+      loop_control:
+       loop_var: subnet
+
+
+    - name: configure vlans
+      include_role:
+        name: bigip_vlan
+      when: onboardedstatecurrent['stdout'] != "true" and vlanstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip" and subnet != "mgmt"
+      with_items: "{{ instancevars['subnets'] }}"
+      loop_control:
+       loop_var: subnet
+
+
+
+#configure IPs
+
+
+    - name: configure ips
+      include_role:
+        name: bigip_selfip
+      when: onboardedstatecurrent['stdout'] != "true" and selfipstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip" and subnet != "mgmt"
+      with_items: "{{ instancevars['subnets'] }}"
+      loop_control:
+       loop_var: subnet
+
+#configure default route
+
+    - name: get defaultroute
+      shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/defaultroute || true
+      register: defaultroute
+
+    - debug: var=defaultroute
+
+    - name: configure defaultroute
+      include_role:
+        name: bigip_static_route
+      when: onboardedstatecurrent['stdout'] != "true" and routestatecurrent['stdout'] != "true" and instancevars['type'] == "bigip" and defaultroute['stdout'] != ""
+
+
+    - name: sleep for a bit longer just incase
+      command: "sleep 90"
+      when: onboardedstatecurrent['stdout'] != "true"
+
+##########################
+
+    - name:  
+      include_role: 
+        name: bigip_save
+      when: onboardedstatecurrent['stdout'] != "true" and instancevars['type'] == "bigip"
+
+
+
+    - name: set onboarding state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/state/current true
+      when: onboardedstatecurrent['stdout'] != "true" 
+
+
+#########################
+#big-iq work
+
+    - name: configure bigiq to manage this device
+      include_role:
+        name: bigiq_manage_device
+      when: bigiqmanagedstatecurrent['stdout'] != "true" and  bigiqdevice['stdout'] != ""
+
+
+    - name: set bigiq state
+      command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/bigiq/managed/state/current true
+      when: bigiqmanagedstatecurrent['stdout'] != "true" and  bigiqdevice['stdout'] != ""
+
+########################
+
+
+...

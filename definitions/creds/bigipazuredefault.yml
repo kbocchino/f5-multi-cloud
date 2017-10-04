@@ -1,0 +1,6 @@
+admin:
+ username: azureuser
+ password: <PW>
+root:
+ username: root
+ password: <PW>

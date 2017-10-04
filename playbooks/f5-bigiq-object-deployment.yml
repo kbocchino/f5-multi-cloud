@@ -1,0 +1,29 @@
+---
+- hosts: localhost 
+  connection: local
+  pre_tasks:
+
+    - name: load environment
+      include_vars:
+         file: "../definitions/environment.yml"
+         name: environmentvars
+    
+    - debug: var=environmentvars
+
+
+    - name: get list of instances that are active
+      shell: etcdctl ls /inventory/f5/deployments/devices | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/type  echo;' | awk -F/ '$7 == "bigiq" { print $6}' | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get /inventory/f5/deployments/devices/%/nuked/state/desired 2>&1;' | awk -F/ '$2 ~ "Error" || $2 == "false" { print $1}'
+      register: deviceinventory
+
+    - debug: var=deviceinventory
+
+
+
+    - name: loop through inventory
+      include_role:
+        name: f5-bigiq-object-deployment
+      with_items: "{{ deviceinventory['stdout_lines'] }}"  
+      loop_control:
+       loop_var: device
+
+...

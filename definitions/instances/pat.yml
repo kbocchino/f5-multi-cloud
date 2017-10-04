@@ -1,0 +1,14 @@
+name: pat
+domain: multi-cloud.lab.fp.f5net.com
+type: bigip
+mode: unmanaged
+hamode: dsc
+provider: phy-sjc
+creds: bigipdefault.yml
+apiusername: admin
+allowautoplacment: no 
+subnets: 
+ mgmt:
+  ips:
+   - 172.16.1.165
+   - 172.16.1.166

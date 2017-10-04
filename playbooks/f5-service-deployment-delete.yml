@@ -1,0 +1,79 @@
+---
+- hosts: localhost 
+  connection: local
+  pre_tasks:
+
+    - debug: var=servicename
+
+
+    - name: load environment
+      include_vars:
+         file: "../definitions/environment.yml"
+         name: environmentvars
+
+
+    - name: get desired state
+      shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/nuked/state/desired || true
+      register: servicenukedstatedesired
+
+    - debug: var=servicenukedstatedesired
+
+    - name: get nuke safe
+      shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/nuke/safe || true
+      register: servicenukesafe
+
+    - debug: var=servicenukesafe
+
+##check to see if there is still a deployment file for this instance name
+
+    - name: find instance file for instancename
+      find:
+        paths: "../definitions/services"
+        patterns: "*.yml,-*.yaml" 
+        contains: '^name:\s*{{servicename}}\b'
+      register: servicedeploymentfiles      
+
+    - debug: var=servicedeploymentfiles
+
+    - name: mark for nuking if we dont have a file
+      command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/nuked/state/desired true
+      when: servicedeploymentfiles['matched'] != 1 and servicenukedstatedesired['stdout'] != "true"
+
+    - name: get desired state
+      shell: etcdctl get /inventory/f5/deployments/services/{{servicename}}/nuked/state/desired || true
+      register: servicenukedstatedesired
+
+    - debug: var=servicenukedstatedesired
+
+    - name: get componet list
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/ | awk -F/ '{ print $8}' || true
+      register: componetinventory
+
+    - debug: var=componetinventory
+
+
+    - name: loop through componets
+      include_role:
+        name: f5-service-componet-deployment-delete
+      with_items: "{{ componetinventory['stdout_lines']|unique}}"
+      loop_control:
+       loop_var: componet
+
+
+
+# remove service if no componets
+
+    - name: get list of componets
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/ | awk -F/ '{ print $8}' || true
+      register: componetinventory
+      when: servicenukedstatedesired['stdout'] == "true"
+
+    - debug: var=componetinventory
+
+
+
+    - name: clear all other history
+      command: etcdctl rm /inventory/f5/deployments/services/{{servicename}} --recursive
+      when: servicenukedstatedesired['stdout'] == "true" and componetinventory['stdout'] == ""
+
+...

@@ -1,0 +1,42 @@
+---
+
+
+- name: get current ip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/subnets/{{subnet}}/ip || true
+  register: currentip
+
+- debug: var=currentip
+
+- name: allocate new vipaddrs
+  include_role:
+   name: multi-cloud-ipam
+   tasks_from: device_allocation
+  when: currentip['stdout'] == ""
+
+- name: get current ip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/subnets/{{subnet}}/ip || true
+  register: currentip
+
+- debug: var=currentip
+
+- name: get current subnetmask
+  shell: etcdctl get /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/subnets/{{subnet}}/subnetmask || true
+  register: subnetmask
+
+- debug: var=subnetmask
+
+- name: configure selfip
+  delegate_to: localhost
+  bigip_selfip:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}" 
+    name: "{{ currentip['stdout'] }}"
+    vlan: "{{subnet}}"
+    address: "{{currentip['stdout']}}"
+    netmask: "{{subnetmask['stdout']}}"
+
+
+
+- name: set selfip state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/selfip/state/current true

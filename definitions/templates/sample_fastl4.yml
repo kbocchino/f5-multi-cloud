@@ -1,0 +1,17 @@
+configtemplate: ../definitions/templates/sample_defaults.yml
+config:
+ vs__ConnectionLimit: 0
+ vs__IpProtocol: tcp
+ vs__OptionConnectionMirroring: disabled
+ vs__OptionSourcePort: preserve
+ vs__ProfileClientProtocol: /Common/fastL4
+ vs__ProfileDefaultPersist: /Common/source_addr
+ vs__ProfileSecurityIPBlacklist: none
+ vs__ProfileServerProtocol: /Common/fastL4
+ vs__SNATConfig: automap
+ vs__SourceAddress: 0.0.0.0/0
+ monitor__Monitors:
+  - Index: 0
+    Name: /Common/tcp
+    Type: none
+    Options: none 

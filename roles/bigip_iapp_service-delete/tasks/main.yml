@@ -1,0 +1,79 @@
+
+---
+- debug: var=componet_iapp
+- debug: var=servicename
+- debug: var=placement_iapp
+
+- name: get mgmtip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{deployment.keys().0}}/instances/{{deployment.values().0}}/mgmtip || true
+  register: mgmtip
+
+- debug: var=mgmtip
+
+- name: get apiusername
+  shell: etcdctl get /inventory/f5/deployments/devices/{{deployment.keys().0}}/creds/apiusername || true
+  register: apiusername
+
+- debug: var=apiusername
+
+- name: get instancecredsfile
+  shell: etcdctl get /inventory/f5/deployments/devices/{{deployment.keys().0}}/creds/path || true
+  register: instancecredsfile
+
+- debug: var=instancecredsfile
+
+
+- name: load instance creds file
+  include_vars:
+     file: "../definitions/creds/{{ instancecredsfile['stdout'] }}"
+     name: instancecredsvars
+
+- debug: var=instancecredsvars
+
+
+
+
+
+
+- name: strip logging publisher if analytics iapp
+  delegate_to: localhost
+  bigip_command:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ apiusername['stdout'] }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    commands: "modify sys log-config publisher logging-publisher-f5_analytics destinations delete { {{servicename}}__{{componet_iapp}}-hec-forwarder-tcp-log-splunkformat }"
+  when: templateinventory['stdout'] == "f5.analytics"
+  ignore_errors: yes
+
+- name: remove iapp service
+  delegate_to: localhost
+  bigip_iapp_service:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ apiusername['stdout'] }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    state: "absent"
+    force: yes
+    name: "{{servicename}}__{{componet_iapp}}"
+
+
+#clean up ipam / allocation
+
+
+- name: clear iapp service deployment
+  command: etcdctl rm -r /inventory/f5/deployments/services/{{servicename}}/componets/{{componet_iapp}}/placements/{{placement_iapp}}/{{templateinventory['stdout']}}/deployments/{{deployment.keys().0}}/instances/{{deployment.values().0}}
+
+
+
+- name: get current depoyment inventoryuuids
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet_iapp}}/placements/{{placement_iapp}}/{{templateinventory['stdout']}}/deployments/{{deployment.keys().0}}/instances/ | awk -F/ '{ print $15}' || true
+  register: currentdeploymentinstanceuuidinventory
+
+- debug: var=currentdeploymentinstanceuuidinventory
+
+- name: clear deployment
+  command: etcdctl rm -r /inventory/f5/deployments/services/{{servicename}}/componets/{{componet_iapp}}/placements/{{placement_iapp}}/{{templateinventory['stdout']}}/deployments/{{deployment.keys().0}}
+  when: currentdeploymentinstanceuuidinventory['stdout'] == ""
+
+
+
+...

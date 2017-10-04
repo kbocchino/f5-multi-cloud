@@ -1,0 +1,209 @@
+---
+
+
+#need to allocate IPs in etcd based on an input of
+#ipampassthrough_componet
+#servicevars
+#instancevars
+#placementdeployment scalingprovidervars['instancename']
+#placementprovider {{provider['stdout']}}
+#vipsubname <-loop_var
+
+- set_fact:
+   placementprovider: "{{provider['stdout']}}"
+ 
+- debug: var=vipsubname
+
+- set_fact:
+   allocatedip: ""
+
+- name: get hamode
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/hamode || true
+  register: hamode
+
+- debug: var=hamode
+
+# find the ip allocated to another instanceuuid because every instanceuuid in the same dsc should have the same IP.
+
+- name: get current vipip from other instances
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{ipampassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/ | xargs -n 1 -I% sh -c 'etcdctl get %/vipips/{{vipsubname}}/ip 2>&1;' | awk -F/ '$1 != "" && $1 !~ "Error" {print $1}' || true
+  register: dsclookup
+  when: hamode['stdout'] == "dsc"
+
+- debug: var=dsclookup
+
+
+- name: get current vipip method from other instances
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{ipampassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/ | xargs -n 1 -I% sh -c 'etcdctl get %/vipips/{{vipsubname}}/method 2>&1;' | awk -F/ '$1 != "" && $1 !~ "Error" {print $1}' || true
+  register: methodlookup
+  when: hamode['stdout'] == "dsc"
+
+- debug: var=methodlookup
+
+
+- name: pick first address from dsc lookup
+  set_fact:
+   allocatedip: "{{dsclookup['stdout_lines']|first}}"
+  when: hamode['stdout'] == "dsc" and dsclookup['stdout'] != ""
+
+
+- name: figure out type 
+  debug: var=scalingprovidervars['ips']
+
+
+
+### deal with a supplied list
+
+- set_fact:
+   currentusedvipipslist: []
+  when: scalingprovidervars['ips'] is iterable and scalingprovidervars['ips'] is not string and allocatedip == ""
+
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/IPAM/list/scalinprovider/{{scalingprovidervars['name']}}/vipips | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/consumed/state/current 2>&1;  echo;' | awk -F/ '$10 == "true" {print $9}' || true
+  register: currentusedvipips
+  when: scalingprovidervars['ips'] is iterable and scalingprovidervars['ips'] is not string and allocatedip == ""
+
+
+- debug: var=currentusedvipips
+
+- set_fact:
+   currentusedvipipslist: "{{currentusedvipips['stdout_lines']}}"
+  when: "'stdout' in currentusedvipips and currentusedvipips['stdout'] != '' and allocatedip == ''"
+
+# pick next not used
+
+- name: pick next address
+  set_fact:
+   allocatedip: "{{scalingprovidervars['ips']|difference(currentusedvipipslist)|min}}"
+  when: scalingprovidervars['ips'] is iterable and scalingprovidervars['ips'] is not string and allocatedip == ""
+
+
+- name: consume ip from list
+  shell: etcdctl set /inventory/f5/IPAM/list/scalinprovider/{{scalingprovidervars['name']}}/vipips/{{allocatedip}}/consumed/state/current true
+  when: allocatedip != "" 
+
+- set_fact:
+   ipammethod: "list"
+  when: scalingprovidervars['ips'] is iterable and scalingprovidervars['ips'] is not string and allocatedip != ""
+
+
+- name: consume ip from list - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/list/scalinprovider/{{scalingprovidervars['name']}}/vipips/{{allocatedip}}/consumedby/instanceuuid {{instanceuuid}}
+  when: allocatedip != "" and hamode['stdout'] != "dsc"
+
+- name: consume ip from list - set consumed by instance
+  shell: etcdctl set /inventory/f5/IPAM/list/scalinprovider/{{scalingprovidervars['name']}}/vipips/{{allocatedip}}/consumedby/name {{scalingprovidervars['instancename']}}
+  when: allocatedip != "" and hamode['stdout'] == "dsc"
+
+ 
+
+
+
+########
+
+
+
+
+### deal with IPAM
+
+
+- debug: var=scalingprovidervars['subnet']
+
+
+
+
+
+- name: lookup subnet from default
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/instances/{{instanceuuid}}/defaultvipsubnet/name || true
+  when: "scalingprovidervars['ips'] is string and allocatedip == '' and (scalingprovidervars['ips'] == 'IPAM' or scalingprovidervars['ips'] == 'ipam') and 'subnet' not in scalingprovidervars"
+  register: subnetlookup
+
+- debug: var=subnetlookup
+
+- name: set subnet
+  set_fact:
+   subnet: "{{scalingprovidervars['subnet']}}"
+  when: "scalingprovidervars['ips'] is string and allocatedip == '' and (scalingprovidervars['ips'] == 'IPAM' or scalingprovidervars['ips'] == 'ipam') and 'subnet' in scalingprovidervars"
+
+- name: set subnet
+  set_fact:
+   subnet: "{{subnetlookup['stdout']}}"
+  when: "scalingprovidervars['ips'] is string and allocatedip == '' and (scalingprovidervars['ips'] == 'IPAM' or scalingprovidervars['ips'] == 'ipam') and 'subnet' not in scalingprovidervars and subnetlookup['stdout'] !=''"
+
+- debug: var=subnet
+
+
+- debug: var=ipamvars['networks']
+- debug: var=placementprovider
+- debug: var=ipamvars['networks'][placementprovider]
+- debug: var=ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblocks']
+- debug: var=ipamvars['networks'][placementprovider]['subnets'][subnet]['reservedips']
+
+
+
+- name: get list of used ips
+  shell: etcdctl ls /inventory/f5/IPAM/managed/{{provider['stdout']}}/{{subnet}}/ips/ | awk -F/ '{ print $9}' || true
+  register: consumedips
+  when: subnet is defined
+
+- debug: var=consumedips['stdout']|from_yaml
+
+
+- set_fact:
+   allocatedip: "{{'0.0.0.0/0'|ipaddr(seqint)|ipaddr('address')}}"
+  with_sequence: start="{{ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblock']['start']|ipaddr('int')}}" end="{{ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblock']['end']|ipaddr('int')}}"
+  loop_control:
+   loop_var: seqint
+  when: "scalingprovidervars['ips'] is string and allocatedip == '' and (scalingprovidervars['ips'] == 'IPAM' or scalingprovidervars['ips'] == 'ipam') and (consumedips['stdout']|from_yaml is not iterable or '0.0.0.0/0'|ipaddr(seqint)|ipaddr('address') not in consumedips['stdout']|from_yaml) and ('reservedips' not in ipamvars['networks'][placementprovider]['subnets'][subnet] or '0.0.0.0/0'|ipaddr(seqint)|ipaddr('address') not in ipamvars['networks'][placementprovider]['subnets'][subnet]['reservedips']) and allocatedip == ''"
+
+- set_fact:
+   ipammethod: "ipam"
+  when: "scalingprovidervars['ips'] is string and allocatedip != '' and (scalingprovidervars['ips'] == 'IPAM' or scalingprovidervars['ips'] == 'ipam')"
+ 
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{provider['stdout']}}/{{subnet}}/ips/{{allocatedip}}/consumed/state/current true
+  when: allocatedip != "" and ipammethod == "ipam"
+  
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{provider['stdout']}}/{{subnet}}/ips/{{allocatedip}}/consumedby/instanceuuid {{instanceuuid}}
+  when: allocatedip != "" and ipammethod == "ipam" and hamode['stdout'] != "dsc"
+
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{provider['stdout']}}/{{subnet}}/ips/{{allocatedip}}/consumedby/name {{placementdeployment}}
+  when: allocatedip != "" and ipammethod == "ipam" and hamode['stdout'] == "dsc"  
+
+
+- debug: var=allocatedip
+
+
+
+
+########
+
+
+
+
+### allocate address
+ 
+
+- name: set vipip method for instance
+  shell: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/vipips/{{vipsubname}}/method {{ipammethod}}
+  when: allocatedip != "" 
+
+
+- name: set vipip for instance
+  shell: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/vipips/{{vipsubname}}/ip {{allocatedip}}
+  when: allocatedip != ""
+
+
+
+########
+
+
+
+
+
+
+
+...

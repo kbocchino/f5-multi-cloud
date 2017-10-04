@@ -1,0 +1,269 @@
+
+---
+
+- name: get mgmtip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/instances/{{instanceuuid}}/mgmtip || true
+  register: mgmtip
+
+- debug: var=mgmtip
+
+
+- name: get apiusername
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/creds/apiusername || true
+  register: apiusername
+
+- debug: var=apiusername
+
+
+- name: get scalingprovider
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/scalingprovider/name || true
+  register: scalingprovider
+
+- debug: var=scalingprovider
+
+
+- name: get instancecredsfile
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/creds/path || true
+  register: instancecredsfile
+
+- debug: var=instancecredsfile
+
+- name: load instance creds file
+  include_vars:
+     file: "../definitions/creds/{{instancecredsfile['stdout']}}"
+     name: instancecredsvars
+
+- debug: var=instancecredsvars
+
+
+
+
+
+- name: get templatename
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/instances/{{instanceuuid}}/templates/iapps/{{iappdeploypassthrough_componet['template']}}/active/name/current || true
+  register: templatename
+
+- debug: var=templatename
+
+- set_fact:
+   configtemplatevars: []
+   configtemplateparentvars: []
+   fromiapparray: []
+   toarray: []
+
+- name: load configtemplate file
+  include_vars:
+     file: "{{iappdeploypassthrough_componet['configtemplate']}}"
+     name: configtemplatevarsfile
+  when: "'configtemplate' in iappdeploypassthrough_componet"
+
+- set_fact:
+   configtemplatevars: "{{configtemplatevarsfile}}"
+  when: "'configtemplate' in iappdeploypassthrough_componet"
+
+
+
+
+- name: load configtemplateparent file
+  include_vars:
+     file: "{{configtemplatevars['configtemplate']}}"
+     name: configtemplateparentvarsfile
+  when: "configtemplatevars is iterable and 'configtemplate' in configtemplatevars"
+
+- set_fact:
+   configtemplateparentvars: "{{configtemplateparentvarsfile}}"
+  when: "configtemplatevars is iterable and 'configtemplate' in configtemplatevars"
+
+- debug: var=iappdeploypassthrough_componet['configtemplate']
+- debug: var=configtemplatevars['configtemplate']
+
+- debug: var=configtemplateparentvars
+- debug: var=configtemplatevars
+- debug: var=iappdeploypassthrough_componet['config']
+
+- set_fact:
+   fromiapparray: "{{configtemplatevars['config']|combine(iappdeploypassthrough_componet['config'])}}"
+  when: "configtemplatevars is iterable and 'configtemplate' in iappdeploypassthrough_componet"
+
+- set_fact:
+   fromiapparray: "{{configtemplateparentvars['config']|combine(configtemplatevars['config']|combine(iappdeploypassthrough_componet['config']))}}"
+  when: "configtemplatevars is iterable and 'configtemplate' in configtemplatevars"
+
+- set_fact:
+   fromiapparray: "{{iappdeploypassthrough_componet['config']}}"
+  when: "'configtemplate' not in iappdeploypassthrough_componet"
+
+
+######IPAM STUFF HERE
+#
+
+- set_fact:
+   ipampassthrough_componet: "{{iappdeploypassthrough_componet}}"
+   currentvipipsarray: []
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/vipips | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/ip 2>&1;  echo;' | awk -F/ '$17 != "" && $18 !~ "Error" {print $17 "{{":"}} " $18}' || true
+  register: currentvipips
+  when: "'configsubs' in iappdeploypassthrough_componet"
+
+- debug: var=currentvipips
+- debug: var=currentvipips['stdout']|from_yaml
+
+- set_fact:
+   currentvipipsarray: "{{currentvipips['stdout']|from_yaml}}"
+  when: "'configsubs' in iappdeploypassthrough_componet and currentvipips['stdout'] != ''"
+
+#figure out new
+
+- debug: var=iappdeploypassthrough_componet['configsubs']['vipips']|difference(currentvipipsarray)
+
+  # loop through and allocate missing IP need to pass compo  
+
+- name: allocate new vipaddrs
+  include_role:
+   name: multi-cloud-ipam
+   tasks_from: iapp_allocation
+  with_items: "{{iappdeploypassthrough_componet['configsubs']['vipips']|difference(currentvipipsarray)}}"
+  loop_control:
+   loop_var: vipsubname
+  when: "'configsubs' in iappdeploypassthrough_componet"
+
+
+#refresh after allocation
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/vipips | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/ip 2>&1;  echo;' | awk -F/ '$17 != "" && $18 !~ "Error" {print $17 "{{":"}} " $18}' || true
+  register: currentvipips
+  when: "'configsubs' in iappdeploypassthrough_componet"
+
+- debug: var=currentvipips
+- debug: var=currentvipips['stdout']|from_yaml
+
+- set_fact:
+   currentvipipsarray: "{{currentvipips['stdout']|from_yaml}}"
+  when: "'configsubs' in iappdeploypassthrough_componet and currentvipips['stdout'] != ''"
+
+#todo: figure out changed
+
+
+#todo: deal with removed
+
+
+- name: set tcp port usage
+  shell: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/vipips/{{vipsubname}}/ports/tcp "{{iappdeploypassthrough_componet['configsubs']['vipips'][vipsubname]['ports']['tcp']|to_json}}"
+  with_items: "{{currentvipipsarray}}"
+  loop_control:
+   loop_var: vipsubname
+  when: "'configsubs' in iappdeploypassthrough_componet and currentvipips['stdout'] != ''"
+
+- name: replace subs for ips
+  set_fact:
+   fromiapparray: "{{fromiapparray|regex_replace('%' + vipsubname + '%', currentvipipsarray[vipsubname])}}"
+  with_items: "{{currentvipipsarray}}"
+  loop_control:
+   loop_var: vipsubname
+  when: "'configsubs' in iappdeploypassthrough_componet and currentvipips['stdout'] != ''"
+
+
+- name: replace provider
+  set_fact:
+   fromiapparray: "{{fromiapparray|regex_replace('%PROVIDER%', placementprovider)}}"
+
+- name: replace deployment
+  set_fact:
+   fromiapparray: "{{fromiapparray|regex_replace('%DEPLOYMENT%', placementdeployment)}}"
+
+- name: replace componet
+  set_fact:
+   fromiapparray: "{{fromiapparray|regex_replace('%COMPONET%', iappdeploypassthrough_componet['name'])}}"
+
+- name: replace name
+  set_fact:
+   fromiapparray: "{{fromiapparray|regex_replace('%SERVICENAME%', servicevars['name'])}}"
+
+- name: replace componet
+  set_fact:
+   fromiapparray: "{{fromiapparray|regex_replace('%NAME%', servicevars['name'])}}"
+
+###########
+
+
+
+
+
+
+
+
+
+
+- debug: var=fromiapparray
+- debug: var=fromiapparray|iapp_yml_to_json
+- debug: var=fromiapparray|iapp_yml_to_json|to_nice_json
+
+- debug: var=fromiapparray|hash('md5')
+
+
+#read the current hash
+
+- name: get deployment iapp hash
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/deploymenthash/current || true
+  register: currentdeploymenthash
+
+- debug: var=currentdeploymenthash
+
+- name: get deployment iapp template
+  shell: etcdctl get /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/template/name/current || true
+  register: currenttemplatename
+
+
+- debug: var=currenttemplatename
+
+- debug: var=templatename
+
+
+
+
+- name: install iapp service
+  delegate_to: localhost
+  bigip_iapp_service:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    state: "present"
+    force: yes
+    template: "{{templatename['stdout']}}"
+    name: "{{servicevars['name']}}__{{iappdeploypassthrough_componet['name']}}"
+    parameters: "{{fromiapparray|iapp_yml_to_json|to_json}}"
+  when: currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout'] or force_update == true
+
+
+- debug: var=placementprovider
+- debug: var=placementdeployment
+- debug: var=iappdeploypassthrough_componet
+
+
+#unset the instanceuuid for nukedesired based on the fact that we were just asked to build it
+
+- name: clear componet from being nuked
+  shell: etcdctl rm -r /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/nuked || true
+
+
+- name: set iapp service deployment hash
+  command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/deploymenthash/current {{fromiapparray|hash('md5')}}
+  when: currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout']
+
+
+
+- name: set iapp service deployment
+  command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/template/name/current {{templatename['stdout']}}
+  when: currentdeploymenthash['stdout'] != fromiapparray|hash('md5') or currenttemplatename['stdout'] != templatename['stdout']
+
+- name: set scaling provider
+  command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/deployments/{{placementdeployment}}/scalingprovider/name/current {{scalingprovider['stdout']}}
+  when: "scalingprovider['stdout'] != '' and 'configsubs' in iappdeploypassthrough_componet and currentvipips['stdout'] != ''"
+
+
+- name: set iapp service deployment type
+  command: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/placements/{{placementprovider}}/{{iappdeploypassthrough_componet['template']}}/type {{templatetype}}
+
+...

@@ -1,0 +1,204 @@
+---
+
+
+#need to allocate IPs in etcd based on an input of
+#ipampassthrough_componet
+#servicevars
+#instancevars
+#placementdeployment
+#placementprovider
+#vipsubname <-loop_var
+ 
+ 
+- debug: var=vipsubname
+
+- set_fact:
+   allocatedip: ""
+
+- name: get hamode
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/hamode || true
+  register: hamode
+
+- debug: var=hamode
+
+
+- name: get current vipip from other instances
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{ipampassthrough_componet['name']}}/placements/{{placementprovider}}/{{ipampassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/ | xargs -n 1 -I% sh -c 'etcdctl get %/vipips/{{vipsubname}}/ip 2>&1;' | awk -F/ '$1 != "" && $1 !~ "Error" {print $1}' || true
+  register: dsclookup
+  when: hamode['stdout'] == "dsc"
+
+- debug: var=dsclookup
+
+
+- name: get current vipip method from other instances
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{ipampassthrough_componet['name']}}/placements/{{placementprovider}}/{{ipampassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/ | xargs -n 1 -I% sh -c 'etcdctl get %/vipips/{{vipsubname}}/method 2>&1;' | awk -F/ '$1 != "" && $1 !~ "Error" {print $1}' || true
+  register: methodlookup
+  when: hamode['stdout'] == "dsc"
+
+- debug: var=methodlookup
+
+
+
+- name: pick first address from dsc lookup
+  set_fact:
+   allocatedip: "{{dsclookup['stdout_lines']|first}}"
+  when: hamode['stdout'] == "dsc" and dsclookup['stdout'] != ""
+
+
+
+- name: pick first address from dsc lookup
+  set_fact:
+   ipammethod: "{{methodlookup['stdout_lines']|first}}"
+  when: hamode['stdout'] == "dsc" and methodlookup['stdout'] != ""
+
+
+- name: figure out type 
+  debug: var=ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips']
+
+
+
+### deal with a supplied list
+
+- set_fact:
+   currentusedvipipslist: []
+  when: ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is iterable and ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is not string and allocatedip == ""
+
+
+- name: get current vipip subs
+  shell: etcdctl ls /inventory/f5/IPAM/list/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/vipips/placements/{{placementprovider}}/deployments/{{placementdeployment}}/{{vipsubname}} | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/consumed/state/current 2>&1;  echo;' | awk -F/ '$17 == "true" {print $16}' || true
+  register: currentusedvipips
+  when: ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is iterable and ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is not string and allocatedip == ""
+
+
+- set_fact:
+   currentusedvipipslist: "{{currentusedvipips['stdout_lines']}}"
+  when: "'stdout' in currentusedvipips and currentusedvipips['stdout'] != '' and allocatedip == ''"
+
+# pick next not used
+
+- name: pick next address
+  set_fact:
+   allocatedip: "{{ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips']|difference(currentusedvipipslist)|min}}"
+  when: ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is iterable and ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is not string and allocatedip == ""
+
+
+- name: consume ip from list
+  shell: etcdctl set /inventory/f5/IPAM/list/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/vipips/placements/{{placementprovider}}/deployments/{{placementdeployment}}/{{vipsubname}}/{{allocatedip}}/consumed/state/current true
+  when: allocatedip != ""
+
+- set_fact:
+   ipammethod: "list"
+  when: ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is iterable and ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is not string and allocatedip != ""
+
+- name: consume ip from list - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/list/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/vipips/placements/{{placementprovider}}/deployments/{{placementdeployment}}/{{vipsubname}}/{{allocatedip}}/consumedby/instanceuuid {{instanceuuid}}
+  when: allocatedip != "" and hamode['stdout'] != "dsc"
+
+- name: consume ip from list - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/list/services/{{servicevars['name']}}/componets/{{iappdeploypassthrough_componet['name']}}/vipips/placements/{{placementprovider}}/deployments/{{placementdeployment}}/{{vipsubname}}/{{allocatedip}}/consumedby/name {{placementdeployment}}
+  when: allocatedip != "" and hamode['stdout'] == "dsc"
+ 
+
+
+
+########
+
+
+
+
+### deal with IPAM
+
+- debug: var=ipampassthrough_componet['configsubs']['vipips'][vipsubname]['subnet']
+
+
+
+
+#figure out default network
+- name: lookup subnet from interface
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/instances/{{instanceuuid}}/defaultvipsubnet/name || true
+  when: "ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is string and allocatedip == '' and (ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'IPAM' or ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'ipam') and 'subnet' not in ipampassthrough_componet['configsubs']['vipips'][vipsubname]"
+  register: subnetlookup
+
+- debug: var=subnetlookup
+
+- name: set subnet
+  set_fact:
+   subnet: "{{ipampassthrough_componet['configsubs']['vipips'][vipsubname]['subnet']}}"
+  when: "ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is string and allocatedip == '' and (ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'IPAM' or ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'ipam') and 'subnet' in ipampassthrough_componet['configsubs']['vipips'][vipsubname]"
+
+- name: set subnet
+  set_fact:
+   subnet: "{{subnetlookup['stdout']}}"
+  when: "ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is string and allocatedip == '' and (ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'IPAM' or ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'ipam') and 'subnet' not in ipampassthrough_componet['configsubs']['vipips'][vipsubname] and subnetlookup['stdout'] !=''"
+
+- debug: var=subnet
+
+- debug: var=ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblocks']
+- debug: var=ipamvars['networks'][placementprovider]['subnets'][subnet]['reservedips']
+
+
+
+- name: get list of used ips
+  shell: etcdctl ls /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/ | awk -F/ '{ print $9}' || true
+  register: consumedips
+  when: subnet is defined
+
+- debug: var=consumedips['stdout']|from_yaml
+
+
+- set_fact:
+   allocatedip: "{{'0.0.0.0/0'|ipaddr(seqint)|ipaddr('address')}}"
+  with_sequence: start="{{ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblock']['start']|ipaddr('int')}}" end="{{ipamvars['networks'][placementprovider]['subnets'][subnet]['ipblock']['end']|ipaddr('int')}}"
+  loop_control:
+   loop_var: seqint
+  when: "ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is string and allocatedip == '' and (ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'IPAM' or ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'ipam') and (consumedips['stdout']|from_yaml is not iterable or '0.0.0.0/0'|ipaddr(seqint)|ipaddr('address') not in consumedips['stdout']|from_yaml) and ('reservedips' not in ipamvars['networks'][placementprovider]['subnets'][subnet] or '0.0.0.0/0'|ipaddr(seqint)|ipaddr('address') not in ipamvars['networks'][placementprovider]['subnets'][subnet]['reservedips']) and allocatedip == ''"
+
+- set_fact:
+   ipammethod: "ipam"
+  when: "ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] is string and allocatedip != '' and (ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'IPAM' or ipampassthrough_componet['configsubs']['vipips'][vipsubname]['ips'] == 'ipam')"
+ 
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/{{allocatedip}}/consumed/state/current true
+  when: allocatedip != "" and ipammethod == "ipam"
+  
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/{{allocatedip}}/consumedby/instanceuuid {{instanceuuid}}
+  when: allocatedip != "" and ipammethod == "ipam" and hamode['stdout'] != "dsc"
+
+- name: consume ip from ipam - set consumed by instanceuuid
+  shell: etcdctl set /inventory/f5/IPAM/managed/{{placementprovider}}/{{subnet}}/ips/{{allocatedip}}/consumedby/name {{placementdeployment}}
+  when: allocatedip != "" and ipammethod == "ipam" and hamode['stdout'] == "dsc"  
+
+
+- debug: var=allocatedip
+
+
+
+
+########
+
+
+
+
+### allocate address
+ 
+
+
+- name: set vipip method for instance
+  shell: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{ipampassthrough_componet['name']}}/placements/{{placementprovider}}/{{ipampassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/vipips/{{vipsubname}}/method {{ipammethod}}
+  when: allocatedip != ""
+
+
+- name: set vipip for instance
+  shell: etcdctl set /inventory/f5/deployments/services/{{servicevars['name']}}/componets/{{ipampassthrough_componet['name']}}/placements/{{placementprovider}}/{{ipampassthrough_componet['template']}}/deployments/{{placementdeployment}}/instances/{{instanceuuid}}/vipips/{{vipsubname}}/ip {{allocatedip}}
+  when: allocatedip != ""
+
+########
+
+
+
+
+
+
+
+...

@@ -1,0 +1,26 @@
+---
+
+- debug: var=defaultroute
+
+#- name: configure default route
+#  delegate_to: localhost
+#  bigip_static_route:
+#    server: "{{ mgmtip['stdout'] }}"
+#    user: "{{ instancevars['apiusername'] }}"
+#    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}" 
+#    name: "IPv4-Default"
+#    destination: "0.0.0.0/0"
+#    gateway_address: "{{defaultroute['stdout']}}"
+
+
+- name: configure default route - patch
+  delegate_to: localhost
+  bigip_command:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    commands: "create net route IPv4-Default network default gw {{defaultroute['stdout']}}"
+
+
+- name: set route state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/route/state/current true

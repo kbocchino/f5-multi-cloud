@@ -1,0 +1,59 @@
+---
+# ----------------------------------------------------------------------
+# Configure basic network services that are the same across all devices.
+# ----------------------------------------------------------------------
+
+# Example of setting database variables
+#  Here we use a loop to retry until this first attempt to 
+#  provision using REST completes. This is our first REST call
+#  so we want to be sure the device is ready.
+
+- name: Configuring hostname
+  delegate_to: localhost
+  bigip_hostname:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}" 
+    hostname: "{{ instancevars['name'] }}-{{instanceuuid}}.{{ instancevars['domain'] }}"
+
+- name: Set NTP servers
+  delegate_to: localhost
+  bigip_device_ntp:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    ntp_servers: "{{ providervars['ntp-servers'] }}"
+
+- name: Set Timezone
+  delegate_to: localhost
+  bigip_device_ntp:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    timezone: "{{ providervars['timezone'] }}"
+
+
+- name: Configuring DNS servers
+  delegate_to: localhost
+  bigip_device_dns:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    name_servers: "{{ providervars['dns-servers'] }}"
+    search: "{{ providervars['dns-search'] }}"
+    state: present
+
+- name: Disable the initial setup screen
+  delegate_to: localhost
+  bigip_sys_db:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ instancevars['apiusername'] }}"
+    password: "{{ instancecredsvars[instancevars['apiusername']]['password'] }}"
+    key: "setup.run"
+    value: "false"
+
+
+
+
+- name: set base state
+  command: etcdctl set /inventory/f5/deployments/devices/{{instancevars['name']}}/instances/{{instanceuuid}}/onboarded/base/state/current true

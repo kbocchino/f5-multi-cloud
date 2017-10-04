@@ -1,0 +1,4 @@
+name: aws1
+type: aws
+region: us-west-2
+creds: aws277.yml 

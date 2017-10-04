@@ -1,0 +1,72 @@
+
+---
+
+- name: get mgmtip
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/instances/{{instanceuuid}}/mgmtip || true
+  register: mgmtip
+
+- debug: var=mgmtip
+
+
+
+- name: get apiusername
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/creds/apiusername || true
+  register: apiusername
+
+- debug: var=apiusername
+
+- name: get instancecredsfile
+  shell: etcdctl get /inventory/f5/deployments/devices/{{scalingprovidervars['instancename']}}/creds/path || true
+  register: instancecredsfile
+
+- debug: var=instancecredsfile
+
+
+- name: load instance creds file
+  include_vars:
+     file: "../definitions/creds/{{ instancecredsfile['stdout'] }}"
+     name: instancecredsvars
+
+
+
+- debug: var=instancecredsvars
+
+- name: remove iapp service
+  delegate_to: localhost
+  bigip_iapp_service:
+    server: "{{ mgmtip['stdout'] }}"
+    user: "{{ apiusername['stdout'] }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    state: "absent"
+    force: yes
+    name: "{{servicename}}__{{iappdeploypassthrough_componet}}__scalingprovider"
+
+
+
+# clean up ipam
+
+
+- name: clear iapp service deployment
+  command: etcdctl rm -r /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/{{instanceuuid}}/
+
+
+
+- name: get current depoyment inventoryuuids
+  shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}/instances/ | awk -F/ '{ print $15}' || true
+  register: currentdeploymentinstanceuuidinventory
+
+- debug: var=currentdeploymentinstanceuuidinventory
+
+- name: clear deployment
+  command: etcdctl rm -r /inventory/f5/deployments/services/{{servicename}}/componets/{{iappdeploypassthrough_componet}}/placements/{{provider['stdout']}}/scalingprovider/deployments/{{ scalingprovidervars['instancename'] }}
+  when: currentdeploymentinstanceuuidinventory['stdout'] == ""
+
+
+
+
+
+
+
+
+
+

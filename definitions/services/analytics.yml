@@ -1,0 +1,64 @@
+name: analytics
+componets:
+ - name: analytics
+   placement:
+    - vsphere-sjc: vic
+    - vsphere-sjc2: vera
+    - phy-sjc: pat
+   template: f5.analytics
+   config:
+    alerts__useexistingsplunk: Yes
+    applicationmapping__exportmapping: 
+    applicationmapping__irulesearch: No
+    applicationmapping__mode: Define
+    basic__alerts: Yes
+    basic__facility: "%PROVIDER%"
+    basic__devicegroupoverride: "%DEPLOYMENT%"
+    basic__format: Splunk
+    basic__ihealth: No
+    basic__logging: Yes
+    basic__rbac: No
+    basic__stats: Yes
+    basic__syslog: Yes
+    basic__tenantdefault: multi-cloud-demo-core
+    logging__useexistingsplunk: Yes
+    logging__sendadm: No
+    logging__sendriskdata: No
+    logging__sendrisklogins: No
+    syslog__useexistingsplunk: Yes
+    alerts__useexistingsplunk: Yes
+    statistics__proxy: No
+    statistics__pushinterval: 60
+    statistics__splunkapikey: 36460480-67E0-4B84-85CA-7117B1827602
+    statistics__splunkdestinationip: 34.209.113.12
+    statistics__splunkdestinationport: 8088
+    statistics__splunkdestinationprotocol: HTTPS
+    applicationmapping__mappings:
+     - priority: 10
+       type: App Name
+       datasource: iApp Name
+       regex: \/.*\/(.*)__.*__scalingprovider.app
+       mappingaction: Map
+       appendprefix:
+       directmapping:
+     - priority: 11
+       type: App Name
+       datasource: iApp Name
+       regex: \/.*\/(.*)__.*.app
+       mappingaction: Map
+       appendprefix:
+       directmapping:
+     - priority: 20
+       type: App Component Name
+       datasource: iApp Name
+       regex: \/.*\/.*__(.*__scalingprovider).app
+       mappingaction: Map
+       appendprefix:
+       directmapping:
+     - priority: 21
+       type: App Component Name
+       datasource: iApp Name
+       regex: \/.*\/.*__(.*).app
+       mappingaction: Map
+       appendprefix:
+       directmapping:

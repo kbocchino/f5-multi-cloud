@@ -1,0 +1,97 @@
+---
+# tasks file for f5-service-componet-placement-deployment-delete
+
+    - debug: var=placement
+
+    - name: get template
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/ | grep -v '/$' | xargs -n 1 -I% sh -c 'echo -n %/ ; etcdctl get %/type; echo;' | awk -F/ '$12 == "bigip" { print $11}' || true
+      register: templateinventory
+
+    - debug: var=templateinventory
+
+    - name: get instance placements
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/{{templateinventory['stdout']}}/deployments/ | xargs -n 1 -I% sh -c 'etcdctl ls %/instances;  echo;' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;  echo;' | awk -F/ '$13 != "" { print "- " $13 "{{":"}} " $15}'
+      register: deploymentinventory
+
+    - debug: var=deploymentinventory['stdout']|from_yaml
+
+    #deal with service nuke
+    - name: true up instanceuuid inventory set for nuke
+      command: etcdctl set /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/{{templateinventory['stdout']}}/deployments/{{deployments.keys().0}}/instances/{{deployments.values().0}}/nuked/state/desired true
+      with_items: "{{deploymentinventory['stdout']|from_yaml}}"
+      loop_control:
+       loop_var: deployments
+      when: servicenukedstatedesired['stdout'] == "true" and deploymentinventory['stdout'] != ""
+
+
+
+#get inventory
+    - set_fact:
+       combinednukeddesireddeploymentinventory: []
+
+    - name: get nuked desired instance placements
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/{{templateinventory['stdout']}}/deployments/ | xargs -n 1 -I% sh -c 'etcdctl ls %/instances;  echo;' | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;  echo;' | awk -F/ '$16 == "true" && $13 != "" { print "- " $13 "{{":"}} " $15}'
+      register: nukeddesireddeploymentinventory
+
+
+    - name: get nuked desired instance placements when deployment set to nuke
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/{{templateinventory['stdout']}}/deployments/ | xargs -n 1 -I% sh -c 'echo -n %/; etcdctl get %/nuked/state/desired 2>&1;  echo;' | awk -F/ '$14 == "true" && $13 != "" { print $13}' | xargs -n 1 -I% sh -c 'etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/{{templateinventory['stdout']}}/deployments/%/instances;' | awk -F/ '$13 != "" { print "- " $13 "{{":"}} " $15}'
+      register: nukeddesireddeploymentinventorypart2
+
+
+
+    - debug: var=nukeddesireddeploymentinventory
+    - debug: var=nukeddesireddeploymentinventory['stdout']|from_yaml
+    - debug: var=nukeddesireddeploymentinventorypart2
+    - debug: var=nukeddesireddeploymentinventorypart2['stdout']|from_yaml
+
+
+    - set_fact:
+       combinednukeddesireddeploymentinventory: "{{nukeddesireddeploymentinventory['stdout']|from_yaml}}"
+      when: nukeddesireddeploymentinventory['stdout'] != ""
+
+    - set_fact:
+       combinednukeddesireddeploymentinventory: "{{nukeddesireddeploymentinventorypart2['stdout']|from_yaml}}"
+      when: nukeddesireddeploymentinventorypart2['stdout'] != "" and nukeddesireddeploymentinventory['stdout'] == ""
+
+    - set_fact:
+       combinednukeddesireddeploymentinventory: "{{nukeddesireddeploymentinventorypart2['stdout']|from_yaml|union(nukeddesireddeploymentinventorypart2['stdout']|from_yaml)}}"
+      when: nukeddesireddeploymentinventorypart2['stdout'] != "" and nukeddesireddeploymentinventory['stdout'] != ""
+
+
+    - debug: var=combinednukeddesireddeploymentinventory
+
+
+
+#deal with dns
+
+
+#deal with disagg
+
+
+#remove the iapp
+    - set_fact:
+       componet_iapp: "{{componet}}"
+       placement_iapp: "{{placement}}"
+
+    - name: loop through instances and delete service
+      include_role:
+        name: bigip_iapp_service-delete
+      with_items: "{{combinednukeddesireddeploymentinventory}}"
+      loop_control:
+       loop_var: deployment
+
+#remove the placement if no remaining bigip type inventory
+
+    - name: get current depoyments
+      shell: etcdctl ls /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/{{templateinventory['stdout']}}/deployments | awk -F/ '{ print $13}' || true
+      register: currentdeploymentinventory
+
+    - debug: var=currentdeploymentinventory
+
+#    - name: clear placement if no deployment
+#      shell: etcdctl rm -r /inventory/f5/deployments/services/{{servicename}}/componets/{{componet}}/placements/{{placement}}/
+#      when: currentdeploymentinventory['stdout'] == ""
+
+
+...

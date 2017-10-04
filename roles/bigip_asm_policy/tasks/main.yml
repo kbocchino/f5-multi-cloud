@@ -1,0 +1,112 @@
+---
+
+- debug: var=iappdeploypassthrough_componet['asmpolicies']
+
+- name: get current template version
+  shell: etcdctl get /inventory/f5/asmpolicies/bigiq-managed{{policy}}/version/current  || true
+  register: currenttemplateversion
+
+- debug: var=currenttemplateversion
+
+- name: get current deployed version
+  shell: etcdctl get /inventory/f5/deployments/devices/{{placementdeployment}}/instances/{{instanceuuid}}/templates/asmpolicies/bigiq-managed{{policy}}/version/current || true
+  register: deployedtemplateversion
+
+- debug: var=deployedtemplateversion
+
+
+- name: search for policy
+  uri:
+    url: "https://{{mgmtip['stdout']}}/mgmt/tm/asm/policies?filter=fullPath eq {{policy}}"
+    method: GET
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    return_content: no
+    validate_certs: no
+  register: asmpolicylist
+
+- debug: var=asmpolicylist
+
+- set_fact:
+   asmid: ""
+
+
+
+- name: lookupid
+  set_fact:
+   asmid: "{{item['id']}}"
+  with_items: "{{asmpolicylist['json']['items']}}"
+  loop_control:
+   loop_var: item
+  when: "'fullPath' in item and item['fullPath'] == policy + '.policy'"
+
+
+- debug: var=asmid
+
+- debug: var=asmpolicylist['json']['items']['totalItems']
+
+
+
+- name: push asm policy
+  uri:
+    url: "https://{{mgmtip['stdout']}}/mgmt/tm/asm/tasks/import-policy"
+    method: POST
+    body: "{'isBase64':'true','file':'{{lookup('file', '../definitions/templates/asmpolicies/bigiq-managed{{policy}}.xml-12.1.0')|b64encode}}', 'fullPath':'{{policy}}'}"
+    body_format: json
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    return_content: no
+    validate_certs: no
+  no_log: true
+  ignore_errors: yes
+  register: asmpolicypush
+
+- debug: var=mgmtip
+- debug: var=asmpolicypush.json.selfLink
+
+
+- shell: sleep 10
+
+- name: get result from import
+  uri:
+    url: "{{asmpolicypush.json.selfLink|regex_replace('localhost', mgmtip['stdout'])}}"
+    method: GET
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    return_content: no
+    validate_certs: no
+  register: asmpolicypushlookup
+
+- debug: var=asmpolicypushlookup.status
+
+- debug: var=asmpolicypushlookup.json.result.policyReference.link
+
+
+- name: push asm policy
+  uri:
+    url: "https://{{mgmtip['stdout']}}/mgmt/tm/asm/tasks/apply-policy"
+    method: POST
+    body: "{'policyReference':{'link':'{{asmpolicypushlookup.json.result.policyReference.link}}'}}"
+    body_format: json
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    return_content: no
+    validate_certs: no
+  ignore_errors: yes
+  register: asmpolicyapply
+
+- shell: sleep 10
+
+- name: get result from apply
+  uri:
+    url: "{{asmpolicyapply.json.selfLink|regex_replace('localhost', mgmtip['stdout'])}}"
+    method: GET
+    user: "{{ apiusername['stdout']  }}"
+    password: "{{ instancecredsvars[apiusername['stdout']]['password'] }}"
+    return_content: no
+    validate_certs: no
+  register: asmpolicyapplylookup
+
+- debug: var=asmpolicyapplylookup.status
+
+...
