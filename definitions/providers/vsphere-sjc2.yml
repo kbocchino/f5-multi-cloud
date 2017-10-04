@@ -2,12 +2,12 @@ name: vsphere-sjc2
 type: vsphere
 region: sjc
 creds: vsphere-sjc.yml 
-vsphere-host: "10.192.75.21"
-vsphere-sdk: "https://10.192.75.21/sdk"
+vsphere-host: "<IP>"
+vsphere-sdk: "https://<IP>/sdk"
 vsphere-insecure: "1"
-vsphere-datacenter: "SJC-PME"
-vsphere-datastore: "datastore4"
-vsphere-resource-pool: "default"
+vsphere-datacenter: "<DATACENTER>"
+vsphere-datastore: "<DATASTORE>"
+vsphere-resource-pool: "<RESOURCEPOOL>"
 ntp-servers:
  - "0.pool.ntp.org"
  - "1.pool.ntp.org" 
