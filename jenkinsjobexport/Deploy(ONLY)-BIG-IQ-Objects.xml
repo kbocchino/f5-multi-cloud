@@ -7,8 +7,8 @@
     <configVersion>2</configVersion>
     <userRemoteConfigs>
       <hudson.plugins.git.UserRemoteConfig>
-        <url>YOURLOCATION</url>
-        <credentialsId>YOURLOCATION</credentialsId>
+        <url>git@10.192.75.120:/srv/git/f5.git</url>
+        <credentialsId>a71896e1-b935-4963-b773-70a903467d3e</credentialsId>
       </hudson.plugins.git.UserRemoteConfig>
     </userRemoteConfigs>
     <branches>

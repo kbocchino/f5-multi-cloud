@@ -1,0 +1,93 @@
+---
+- hosts: localhost 
+  connection: local
+  
+  pre_tasks:
+    - debug: var=fileinput
+
+    - name: load instance details
+      include_vars:
+         file: "{{ fileinput }}"
+         name: instancevars
+
+    - debug: var=instancevars
+
+    - name: load provider file
+      include_vars:
+         file: "../service_definitions/provider-{{ instancevars['provider'] }}.yml"
+         name: providervars
+
+    - debug: var=providervars
+
+    - name: load creds file
+      include_vars:
+         file: "../service_definitions/{{ providervars['creds'] }}"
+         name: credsvars
+
+    - debug: var=credsvars
+
+    - name: set facts for testing only
+      set_fact:
+       network_subnet: subnet-732cae28
+       instance_uuid: 04258045 
+   
+    - name: set the stack_name   
+      set_fact:
+       stack_name: "{{ instancevars['name'] }}-{{ instance_uuid }}"
+     
+    - name: Get the instance id of the bigip for a given stack name
+      cloudformation_facts:
+        aws_access_key: "{{ credsvars['aws-access-key'] }}"
+        aws_secret_key: "{{ credsvars['aws-secret-key'] }}" 
+        region: "{{ providervars['region'] }}"
+        stack_name: "{{ stack_name }}"
+        all_facts: false
+        stack_resources: true
+      when: providervars['type'] == "aws" 
+      register: stack_info
+    
+    - set_fact:
+        bigip_id: "{{ stack_info['ansible_facts']['cloudformation'][stack_name]['stack_resources']['Bigip1Instance'] }}"
+        eni_id_method1: "{{ stack_info['ansible_facts']['cloudformation'][stack_name]['stack_resources']['Bigip1subnet1Az1Interface'] }}"
+    
+    - debug: 
+        msg: "{{ bigip_id }}"  
+    
+    - debug: 
+        msg: "{{ eni_id_method1 }}"  
+
+    
+    - name:  Get the eni for a given subnet id and bigip instance id
+      ec2_eni_facts:
+        aws_access_key: "{{ credsvars['aws-access-key'] }}"
+        aws_secret_key: "{{ credsvars['aws-secret-key'] }}" 
+        region: "{{ providervars['region'] }}"
+        filters:
+           attachment.instance-id: "{{ bigip_id }}"
+           subnet-id: "{{ network_subnet }}"
+      when: providervars['type'] == "aws" 
+      register: eni_fact
+
+    - set_fact:
+        eni_id_method2: "{{ eni_fact['network_interfaces'][0]['network_interface_id'] }}"
+    
+    - debug: 
+        msg: "{{ eni_id_method2 }}"  
+
+    - name: Add a secondary private ip to the given eni
+      
+      ec2_eni:
+        description: Network interface with a secondary private ip for DataOne subnet 
+        aws_access_key: "{{ credsvars['aws-access-key'] }}"
+        aws_secret_key: "{{ credsvars['aws-secret-key'] }}" 
+        region: "{{ providervars['region'] }}"
+        subnet_id: "{{ network_subnet }}"
+        eni_id: "{{ eni_id_method2 }}"
+        secondary_private_ip_address_count: 1
+        state: present
+      when: providervars['type'] == "aws" 
+
+      register: eni
+
+    - debug: msg="{{ eni }}"
+...
