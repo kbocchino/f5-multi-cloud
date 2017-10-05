@@ -305,7 +305,7 @@
 - debug: var=corevip
 
 - set_fact:
-   fromiapparray: "{{ fromiapparray|combine({'vs__Name':iappdeploypassthrough_componet, 'pool__addr':currentscalingvipipsarray[corevip.split('|').0], 'pool__port': corevip.split('|').2|string, 'pool__DefaultPoolIndex': corevip.split('|').0 + '-tcp-' + corevip.split('|').2|string}) }}"
+   fromiapparray: "{{ fromiapparray|combine({'vs__Name':'vs-' + iappdeploypassthrough_componet, 'pool__addr':currentscalingvipipsarray[corevip.split('|').0], 'pool__port': corevip.split('|').2|string, 'pool__DefaultPoolIndex': corevip.split('|').0 + '-tcp-' + corevip.split('|').2|string}) }}"
 
 
 - name: setup vips
